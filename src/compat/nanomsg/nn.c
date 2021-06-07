@@ -8,34 +8,34 @@
 // found online at https://opensource.org/licenses/MIT.
 //
 
-#include "nn.h"
+#include "nng/compat/nanomsg/nn.h"
 
 // transports
-#include "inproc.h"
-#include "ipc.h"
-#include "tcp.h"
-#include "ws.h"
+#include "nng/compat/nanomsg/inproc.h"
+#include "nng/compat/nanomsg/ipc.h"
+#include "nng/compat/nanomsg/tcp.h"
+#include "nng/compat/nanomsg/ws.h"
 
 // protocols
-#include "bus.h"
-#include "pair.h"
-#include "pipeline.h"
-#include "pubsub.h"
-#include "reqrep.h"
-#include "survey.h"
+#include "nng/compat/nanomsg/bus.h"
+#include "nng/compat/nanomsg/pair.h"
+#include "nng/compat/nanomsg/pipeline.h"
+#include "nng/compat/nanomsg/pubsub.h"
+#include "nng/compat/nanomsg/reqrep.h"
+#include "nng/compat/nanomsg/survey.h"
 
 // underlying NNG headers
-#include "nng.h"
-#include "protocol/bus0/bus.h"
-#include "protocol/pair0/pair.h"
-#include "protocol/pipeline0/pull.h"
-#include "protocol/pipeline0/push.h"
-#include "protocol/pubsub0/pub.h"
-#include "protocol/pubsub0/sub.h"
-#include "protocol/reqrep0/rep.h"
-#include "protocol/reqrep0/req.h"
-#include "protocol/survey0/respond.h"
-#include "protocol/survey0/survey.h"
+#include "nng/nng.h"
+#include "nng/protocol/bus0/bus.h"
+#include "nng/protocol/pair0/pair.h"
+#include "nng/protocol/pipeline0/pull.h"
+#include "nng/protocol/pipeline0/push.h"
+#include "nng/protocol/pubsub0/pub.h"
+#include "nng/protocol/pubsub0/sub.h"
+#include "nng/protocol/reqrep0/rep.h"
+#include "nng/protocol/reqrep0/req.h"
+#include "nng/protocol/survey0/respond.h"
+#include "nng/protocol/survey0/survey.h"
 
 #include "core/nng_impl.h"
 
@@ -238,7 +238,7 @@ nn_socket(int domain, int protocol)
 	}
 
 	// Legacy sockets have nodelay disabled.
-	(void) nng_setopt_bool(sock, NNG_OPT_TCP_NODELAY, false);
+	(void) nng_socket_set_bool(sock, NNG_OPT_TCP_NODELAY, false);
 	return ((int) sock.id);
 }
 
@@ -683,7 +683,7 @@ nn_getdomain(nng_socket s, void *valp, size_t *szp)
 	bool b;
 	int  rv;
 
-	if ((rv = nng_getopt_bool(s, NNG_OPT_RAW, &b)) != 0) {
+	if ((rv = nng_socket_get_bool(s, NNG_OPT_RAW, &b)) != 0) {
 		nn_seterror(rv);
 		return (-1);
 	}
@@ -704,7 +704,7 @@ nn_getfd(nng_socket s, void *valp, size_t *szp, const char *opt)
 	int    rv;
 	SOCKET sfd;
 
-	if ((rv = nng_getopt_int(s, opt, &ifd)) != 0) {
+	if ((rv = nng_socket_get_int(s, opt, &ifd)) != 0) {
 		nn_seterror(rv);
 		return (-1);
 	}
@@ -799,7 +799,7 @@ nn_settcpnodelay(nng_socket s, const void *valp, size_t sz)
 		return (-1);
 	}
 
-	if ((rv = nng_setopt_bool(s, NNG_OPT_TCP_NODELAY, val)) != 0) {
+	if ((rv = nng_socket_set_bool(s, NNG_OPT_TCP_NODELAY, val)) != 0) {
 		nn_seterror(rv);
 		return (-1);
 	}
@@ -813,7 +813,7 @@ nn_gettcpnodelay(nng_socket s, void *valp, size_t *szp)
 	int  ival;
 	int  rv;
 
-	if ((rv = nng_getopt_bool(s, NNG_OPT_TCP_NODELAY, &val)) != 0) {
+	if ((rv = nng_socket_get_bool(s, NNG_OPT_TCP_NODELAY, &val)) != 0) {
 		nn_seterror(rv);
 		return (-1);
 	}
@@ -829,7 +829,7 @@ nn_getrcvbuf(nng_socket s, void *valp, size_t *szp)
 	int cnt;
 	int rv;
 
-	if ((rv = nng_getopt_int(s, NNG_OPT_RECVBUF, &cnt)) != 0) {
+	if ((rv = nng_socket_get_int(s, NNG_OPT_RECVBUF, &cnt)) != 0) {
 		nn_seterror(rv);
 		return (-1);
 	}
@@ -855,7 +855,7 @@ nn_setrcvbuf(nng_socket s, const void *valp, size_t sz)
 	// estimate, and assumes messages are 1kB on average.
 	cnt += 1023;
 	cnt /= 1024;
-	if ((rv = nng_setopt_int(s, NNG_OPT_RECVBUF, cnt)) != 0) {
+	if ((rv = nng_socket_set_int(s, NNG_OPT_RECVBUF, cnt)) != 0) {
 		nn_seterror(rv);
 		return (-1);
 	}
@@ -868,7 +868,7 @@ nn_getsndbuf(nng_socket s, void *valp, size_t *szp)
 	int cnt;
 	int rv;
 
-	if ((rv = nng_getopt_int(s, NNG_OPT_SENDBUF, &cnt)) != 0) {
+	if ((rv = nng_socket_get_int(s, NNG_OPT_SENDBUF, &cnt)) != 0) {
 		nn_seterror(rv);
 		return (-1);
 	}
@@ -894,7 +894,7 @@ nn_setsndbuf(nng_socket s, const void *valp, size_t sz)
 	// estimate, and assumes messages are 1kB on average.
 	cnt += 1023;
 	cnt /= 1024;
-	if ((rv = nng_setopt_int(s, NNG_OPT_SENDBUF, cnt)) != 0) {
+	if ((rv = nng_socket_set_int(s, NNG_OPT_SENDBUF, cnt)) != 0) {
 		nn_seterror(rv);
 		return (-1);
 	}
@@ -923,7 +923,7 @@ nn_setrcvmaxsz(nng_socket s, const void *valp, size_t sz)
 		errno = EINVAL;
 		return (-1);
 	}
-	if ((rv = nng_setopt_size(s, NNG_OPT_RECVMAXSZ, val)) != 0) {
+	if ((rv = nng_socket_set_size(s, NNG_OPT_RECVMAXSZ, val)) != 0) {
 		nn_seterror(rv);
 		return (-1);
 	}
@@ -937,7 +937,7 @@ nn_getrcvmaxsz(nng_socket s, void *valp, size_t *szp)
 	int    rv;
 	size_t val;
 
-	if ((rv = nng_getopt_size(s, NNG_OPT_RECVMAXSZ, &val)) != 0) {
+	if ((rv = nng_socket_get_size(s, NNG_OPT_RECVMAXSZ, &val)) != 0) {
 		nn_seterror(rv);
 		return (-1);
 	}
@@ -1104,7 +1104,7 @@ nn_getsockopt(int s, int nnlevel, int nnopt, void *valp, size_t *szp)
 		return (-1);
 	}
 
-	if ((rv = nng_getopt(sid, name, valp, szp)) != 0) {
+	if ((rv = nng_socket_get(sid, name, valp, szp)) != 0) {
 		nn_seterror(rv);
 		return (-1);
 	}
@@ -1141,7 +1141,7 @@ nn_setsockopt(int s, int nnlevel, int nnopt, const void *valp, size_t sz)
 		return (-1);
 	}
 
-	if ((rv = nng_setopt(sid, name, valp, sz)) != 0) {
+	if ((rv = nng_socket_set(sid, name, valp, sz)) != 0) {
 		nn_seterror(rv);
 		return (-1);
 	}
@@ -1234,7 +1234,7 @@ nn_poll(struct nn_pollfd *fds, int nfds, int timeout)
 		if (fds[i].events & NN_POLLIN) {
 			nng_socket s;
 			s.id = fds[i].fd;
-			if ((rv = nng_getopt_int(s, NNG_OPT_RECVFD, &fd)) !=
+			if ((rv = nng_socket_get_int(s, NNG_OPT_RECVFD, &fd)) !=
 			    0) {
 				nn_seterror(rv);
 				NNI_FREE_STRUCTS(pfd, nfds * 2);
@@ -1251,7 +1251,7 @@ nn_poll(struct nn_pollfd *fds, int nfds, int timeout)
 		if (fds[i].events & NN_POLLOUT) {
 			nng_socket s;
 			s.id = fds[i].fd;
-			if ((rv = nng_getopt_int(s, NNG_OPT_SENDFD, &fd)) !=
+			if ((rv = nng_socket_get_int(s, NNG_OPT_SENDFD, &fd)) !=
 			    0) {
 				nn_seterror(rv);
 				NNI_FREE_STRUCTS(pfd, nfds * 2);
@@ -1300,8 +1300,8 @@ nn_poll(struct nn_pollfd *fds, int nfds, int timeout)
 	return (rv);
 
 #else // NNG_PLATFORM_WINDOWS or NNG_PLATFORM_POSIX
-	NNI_ARG_UNUSED(pfds);
-	NNI_ARG_UNUSED(npfd);
+	NNI_ARG_UNUSED(fds);
+	NNI_ARG_UNUSED(nfds);
 	NNI_ARG_UNUSED(timeout);
 	errno = ENOTSUP;
 	return (-1);
@@ -1317,7 +1317,7 @@ nn_term(void)
 	// all sockets in the process, including those
 	// in use by libraries, etc.  Accordingly, do not use this
 	// in a library -- only e.g. atexit() and similar.
-	nng_closeall();
+	nni_sock_closeall();
 }
 
 uint64_t

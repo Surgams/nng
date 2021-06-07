@@ -1,6 +1,7 @@
 //
-// Copyright 2018 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2020 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
+// Copyright 2018 Devolutions <info@devolutions.net>
 //
 // This software is supplied under the terms of the MIT License, a
 // copy of which should be located in the distribution where this
@@ -10,6 +11,8 @@
 
 #ifndef CORE_TRANSPORT_H
 #define CORE_TRANSPORT_H
+
+#include "core/options.h"
 
 // We quite intentionally use a signature where the upper word is nonzero,
 // which ensures that if we get garbage we will reject it.  This is more
@@ -25,29 +28,9 @@
 #define NNI_TRANSPORT_V3 0x54520003
 #define NNI_TRANSPORT_V4 0x54520004
 #define NNI_TRANSPORT_V5 0x54520005
-#define NNI_TRANSPORT_VERSION NNI_TRANSPORT_V5
-
-// Option handlers.
-struct nni_tran_option {
-	// o_name is the name of the option.
-	const char *o_name;
-
-	// o_type is the type of the option.
-	nni_opt_type o_type;
-
-	// o_get retrieves the value of the option. The first argument is the
-	// dialer, listener, or pipe where the request is being made.
-	int (*o_get)(void *, void *, size_t *, nni_opt_type);
-
-	// o_set sets the value of the option.  The first argument is the
-	// dialer, listener, or pipe where the request is being made.
-	int (*o_set)(void *, const void *, size_t, nni_opt_type);
-
-	// o_chk checks to see if the proposed value is legal -- this is
-	// checks only the type, size, and generic range validation.  This
-	// function can be called before any transport objects are created.
-	int (*o_chk)(const void *, size_t, nni_opt_type);
-};
+#define NNI_TRANSPORT_V6 0x54220006
+#define NNI_TRANSPORT_V7 0x54220006
+#define NNI_TRANSPORT_VERSION NNI_TRANSPORT_V7
 
 // Endpoint operations are called by the socket in a
 // protocol-independent fashion.  The socket makes individual calls,
@@ -78,10 +61,16 @@ struct nni_tran_dialer_ops {
 	// nonblocking.
 	void (*d_close)(void *);
 
+	// d_getopt is used to obtain an option.
+	int (*d_getopt)(void *, const char *, void *, size_t *, nni_type);
+
+	// d_setopt is used to set or change an option.
+	int (*d_setopt)(void *, const char *, const void *, size_t, nni_type);
+
 	// d_options is an array of dialer options.  The final
 	// element must have a NULL name. If this member is NULL, then
 	// no dialer specific options are available.
-	nni_tran_option *d_options;
+	nni_option *d_options;
 };
 
 struct nni_tran_listener_ops {
@@ -108,10 +97,16 @@ struct nni_tran_listener_ops {
 	// nonblocking.
 	void (*l_close)(void *);
 
+	// l_getopt is used to obtain an option.
+	int (*l_getopt)(void *, const char *, void *, size_t *, nni_type);
+
+	// l_setopt is used to set or change an option.
+	int (*l_setopt)(void *, const char *, const void *, size_t, nni_type);
+
 	// l_options is an array of listener options.  The final
 	// element must have a NULL name. If this member is NULL, then
 	// no dialer specific options are available.
-	nni_tran_option *l_options;
+	nni_option *l_options;
 };
 
 // Pipe operations are entry points called by the socket. These may be
@@ -157,10 +152,9 @@ struct nni_tran_pipe_ops {
 	// whatever transport specific manner is appropriate.
 	uint16_t (*p_peer)(void *);
 
-	// p_options is an array of pipe options.  The final element
-	// must have a NULL name. If this member is NULL, then no
-	// transport specific options are available.
-	nni_tran_option *p_options;
+	// p_getopt is used to obtain an option.  Pipes don't implement
+	// option setting.
+	int (*p_getopt)(void *, const char *, void *, size_t *, nni_type);
 };
 
 // Transport implementation details.  Transports must implement the
@@ -195,7 +189,6 @@ struct nni_tran {
 // These APIs are used by the framework internally, and not for use by
 // transport implementations.
 extern nni_tran *nni_tran_find(nni_url *);
-extern int       nni_tran_chkopt(const char *, const void *, size_t, int);
 extern int       nni_tran_sys_init(void);
 extern void      nni_tran_sys_fini(void);
 extern int       nni_tran_register(const nni_tran *);

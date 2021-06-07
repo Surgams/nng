@@ -1,5 +1,5 @@
 //
-// Copyright 2018 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2019 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -118,7 +118,7 @@ nni_http_res_reset(nni_http_res *res)
 	nni_strfree(res->vers);
 	res->vers   = NULL;
 	res->rsn    = NULL;
-	res->code   = 0;
+	res->code   = NNG_HTTP_STATUS_OK;
 	res->parsed = false;
 	nni_free(res->buf, res->bufsz);
 	res->buf   = NULL;
@@ -128,15 +128,19 @@ nni_http_res_reset(nni_http_res *res)
 void
 nni_http_req_free(nni_http_req *req)
 {
-	nni_http_req_reset(req);
-	NNI_FREE_STRUCT(req);
+	if (req != NULL) {
+		nni_http_req_reset(req);
+		NNI_FREE_STRUCT(req);
+	}
 }
 
 void
 nni_http_res_free(nni_http_res *res)
 {
-	nni_http_res_reset(res);
-	NNI_FREE_STRUCT(res);
+	if (res != NULL) {
+		nni_http_res_reset(res);
+		NNI_FREE_STRUCT(res);
+	}
 }
 
 static int
@@ -376,6 +380,17 @@ nni_http_req_copy_data(nni_http_req *req, const void *data, size_t size)
 	if (((rv = http_entity_copy_data(&req->data, data, size)) != 0) ||
 	    ((rv = http_set_content_length(&req->data, &req->hdrs)) != 0)) {
 		http_entity_set_data(&req->data, NULL, 0);
+		return (rv);
+	}
+	return (0);
+}
+
+int
+nni_http_req_alloc_data(nni_http_req *req, size_t size)
+{
+	int rv;
+
+	if ((rv = http_entity_alloc_data(&req->data, size)) != 0) {
 		return (rv);
 	}
 	return (0);
@@ -640,7 +655,7 @@ nni_http_res_alloc(nni_http_res **resp)
 	res->data.own  = false;
 	res->vers      = NULL;
 	res->rsn       = NULL;
-	res->code      = 0;
+	res->code      = NNG_HTTP_STATUS_OK;
 	*resp          = res;
 	return (0);
 }
@@ -904,7 +919,7 @@ static struct {
 
 	// 100 series -- informational
 	{ NNG_HTTP_STATUS_CONTINUE, "Continue" },
-	{ NNG_HTTP_STATUS_SWITCHING, "Swithching Protocols" },
+	{ NNG_HTTP_STATUS_SWITCHING, "Switching Protocols" },
 	{ NNG_HTTP_STATUS_PROCESSING, "Processing" },
 
 	// 200 series -- successful
@@ -1001,36 +1016,49 @@ nni_http_res_set_reason(nni_http_res *res, const char *reason)
 }
 
 int
+nni_http_alloc_html_error(char **html, uint16_t code, const char *details)
+{
+	const char *rsn = nni_http_reason(code);
+
+	return (nni_asprintf(html,
+	    "<!DOCTYPE html>\n"
+	    "<html><head><title>%d %s</title>\n"
+	    "<style>"
+	    "body { font-family: Arial, sans serif; text-align: center }\n"
+	    "h1 { font-size: 36px; }"
+	    "span { background-color: gray; color: white; padding: 7px; "
+	    "border-radius: 5px }"
+	    "h2 { font-size: 24px; }"
+	    "p { font-size: 20px; }"
+	    "</style></head>"
+	    "<body><p>&nbsp;</p>"
+	    "<h1><span>%d</span></h1>"
+	    "<h2>%s</h2>"
+	    "<p>%s</p>"
+	    "</body></html>",
+	    code, rsn, code, rsn, details != NULL ? details : ""));
+}
+
+int
 nni_http_res_alloc_error(nni_http_res **resp, uint16_t err)
 {
-	char          html[512];
+	char *        html = NULL;
+	nni_http_res *res  = NULL;
 	int           rv;
-	nni_http_res *res;
 
-	if ((rv = nni_http_res_alloc(&res)) != 0) {
-		return (rv);
-	}
-
-	// very simple builtin error page
-	(void) snprintf(html, sizeof(html),
-	    "<head><title>%d %s</title></head>"
-	    "<body><p/><h1 align=\"center\">"
-	    "<span style=\"font-size: 36px; border-radius: 5px; "
-	    "background-color: black; color: white; padding: 7px; "
-	    "font-family: Arial, sans serif;\">%d</span></h1>"
-	    "<p align=\"center\">"
-	    "<span style=\"font-size: 24px; font-family: Arial, sans serif;\">"
-	    "%s</span></p></body>",
-	    err, nni_http_reason(err), err, nni_http_reason(err));
-
-	res->code = err;
-	if (((rv = nni_http_res_set_header(
+	if (((rv = nni_http_res_alloc(&res)) != 0) ||
+	    ((rv = nni_http_alloc_html_error(&html, err, NULL)) != 0) ||
+	    ((rv = nni_http_res_set_header(
 	          res, "Content-Type", "text/html; charset=UTF-8")) != 0) ||
 	    ((rv = nni_http_res_copy_data(res, html, strlen(html))) != 0)) {
+		nni_strfree(html);
 		nni_http_res_free(res);
 	} else {
+		nni_strfree(html);
+		res->code  = err;
 		res->iserr = true;
 		*resp      = res;
 	}
+
 	return (rv);
 }

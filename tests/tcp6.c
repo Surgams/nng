@@ -1,5 +1,5 @@
 //
-// Copyright 2018 Staysail Systems, Inc. <info@staystail.tech>
+// Copyright 2021 Staysail Systems, Inc. <info@staystail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -8,12 +8,14 @@
 // found online at https://opensource.org/licenses/MIT.
 //
 
-#include "convey.h"
-#include "trantest.h"
-
-#include "core/nng_impl.h"
 // TCP tests for IPv6.
-#include "protocol/pair1/pair.h"
+
+#include <nng/nng.h>
+#include <nng/protocol/pair1/pair.h>
+
+#include "convey.h"
+#include "core/nng_impl.h"
+#include "trantest.h"
 
 #include "stubs.h"
 
@@ -90,6 +92,4 @@ TestMain("TCP (IPv6) Transport", {
 		So(nng_dial(s1, "tcp://::1:5055", NULL, 0) == NNG_EADDRINVAL);
 		So(nng_dial(s1, "tcp://[::1]", NULL, 0) == NNG_EADDRINVAL);
 	});
-
-	nng_fini();
 })

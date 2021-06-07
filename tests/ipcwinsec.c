@@ -1,5 +1,5 @@
 //
-// Copyright 2018 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -8,16 +8,14 @@
 // found online at https://opensource.org/licenses/MIT.
 //
 
+#include <nng/nng.h>
+#include <nng/protocol/reqrep0/rep.h>
+#include <nng/protocol/reqrep0/req.h>
+#include <nng/transport/ipc/ipc.h>
+
 #include "convey.h"
-#include "trantest.h"
-
-#include "nng.h"
-
-#include "protocol/reqrep0/rep.h"
-#include "protocol/reqrep0/req.h"
-#include "transport/ipc/ipc.h"
-
 #include "stubs.h"
+#include "trantest.h"
 
 #define ADDR "/tmp/ipc_winsec_test"
 
@@ -25,7 +23,6 @@
 
 #ifndef _WIN32
 TestMain("IPC Security Descriptor", {
-	atexit(nng_fini);
 	Convey("Given a socket and an IPC listener", {
 		nng_socket   s;
 		nng_listener l;
@@ -82,8 +79,6 @@ sdescAuthUsers(PSID sid, PACL *aclp)
 }
 
 TestMain("IPC Security Descriptor", {
-	atexit(nng_fini);
-
 	Convey("Given a socket and an IPC listener", {
 		nng_socket   s;
 		nng_listener l;

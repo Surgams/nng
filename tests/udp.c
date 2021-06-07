@@ -1,5 +1,5 @@
 //
-// Copyright 2018 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -8,20 +8,18 @@
 // found online at https://opensource.org/licenses/MIT.
 //
 
-#include "convey.h"
-#include "trantest.h"
+// Basic UDP tests.
 
 #ifndef _WIN32
 #include <arpa/inet.h>
 #endif
 
-// Basic UDP tests.
+#include "convey.h"
 #include "core/nng_impl.h"
+#include "trantest.h"
 
 TestMain("UDP support", {
-
 	nni_init();
-	atexit(nng_fini);
 
 	trantest_port = trantest_port ? trantest_port : 5555;
 
@@ -230,7 +228,7 @@ TestMain("UDP support", {
 			nng_aio_wait(aio1);
 			So((rv = nng_aio_result(aio1)) != 0);
 			So(rv == NNG_EADDRINVAL || rv == NNG_ENOTSUP ||
-			    rv == NNG_EUNREACHABLE);
+			    rv == NNG_EUNREACHABLE || rv == NNG_EINVAL);
 			nng_aio_free(aio1);
 		});
 
@@ -256,10 +254,9 @@ TestMain("UDP support", {
 			nng_aio_wait(aio1);
 			So((rv = nng_aio_result(aio1)) != 0);
 			So(rv == NNG_EADDRINVAL || rv == NNG_ENOTSUP ||
-			    rv == NNG_EUNREACHABLE);
+			    rv == NNG_EUNREACHABLE || rv == NNG_EINVAL);
 			nng_aio_free(aio1);
 		});
-
 	});
 
 	Convey("Cannot open using bogus sockaddr", {

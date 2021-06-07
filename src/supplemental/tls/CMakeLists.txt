@@ -1,6 +1,9 @@
 #
+# Copyright 2020 Staysail Systems, Inc. <info@staysail.tech>
 # Copyright 2018 Capitar IT Group BV <info@capitar.com>
-# Copyright 2018 Staysail Systems, Inc. <info@staysail.tech>
+# Copyright 2019 Devolutions <info@devolutions.net>
+#
+
 #
 # This software is supplied under the terms of the MIT License, a
 # copy of which should be located in the distribution where this
@@ -8,38 +11,25 @@
 # found online at https://opensource.org/licenses/MIT.
 #
 
-if (NNG_SUPP_TLS)
-	set(NNG_SUPP_TLS_MBEDTLS ON)
-	set(TLS_DEFINES -DNNG_SUPP_TLS)
-endif()
-set(TLS_SOURCES supplemental/tls/tls.h)
+if (NNG_ENABLE_TLS)
+    set(NNG_TLS_ENGINES mbed wolf none)
+    # We assume Mbed for now.  (Someday replaced perhaps with Bear.)
+    set(NNG_TLS_ENGINE mbed CACHE STRING "TLS engine to use.")
+    set_property(CACHE NNG_TLS_ENGINE PROPERTY STRINGS ${NNG_TLS_ENGINES})
+else ()
+    set(NNG_TLS_ENGINE none)
+endif ()
 
-# For now we only support the ARM mbedTLS library.
-if (NNG_SUPP_TLS_MBEDTLS)
+# default TLS implementation for now is Mbed.
+nng_headers(nng/supplemental/tls/tls.h)
+nng_headers(nng/supplemental/tls/engine.h)
 
-	Find_Package(mbedTLS REQUIRED)
+if (NOT NNG_TLS_ENGINE STREQUAL "none")
+    nng_test(tls_test)
+endif ()
 
-	# If it isn't already in the link list, add the TLS libraries there. 
-	# or something, so we take care not to duplicate it).
-	list(FIND NNG_REQUIRED_LIBRARIES ${MBEDTLS_TLS_LIBRARY} _index)
-	if (_index EQUAL -1)
-	    set(NNG_REQUIRED_LIBRARIES ${NNG_REQUIRED_LIBRARIES} ${MBEDTLS_LIBRARIES})
-	    set(NNG_REQUIRED_LIBRARIES ${NNG_REQUIRED_LIBRARIES} PARENT_SCOPE)
-	endif()
+add_subdirectory(mbedtls)
+add_subdirectory(wolfssl)
 
-	# Likewise for the include search path.
-	list(FIND NNG_REQUIRED_INCLUDES ${MBEDTLS_INCLUDE_DIR} _index)
-	if (_index EQUAL -1)
-	    set(NNG_REQUIRED_INCLUDES ${NNG_REQUIRED_INCLUDES} ${MBEDTLS_INCLUDE_DIR})
-	    set(NNG_REQUIRED_INCLUDES ${NNG_REQUIRED_INCLUDES} PARENT_SCOPE)
-	endif()
-	set(TLS_SOURCES ${TLS_SOURCES} supplemental/tls/mbedtls/tls.c)
-else()
-	set(TLS_SOURCES ${TLS_SOURCES} supplemental/tls/none/tls.c)
-endif()
-
-set(TLS_HEADERS supplemental/tls/tls.h)
-
-set(NNG_DEFINES ${NNG_DEFINES} ${TLS_DEFINES} PARENT_SCOPE)
-set(NNG_SOURCES ${NNG_SOURCES} ${TLS_SOURCES} PARENT_SCOPE)
-set(NNG_HEADERS ${NNG_HEADERS} ${TLS_HEADERS} PARENT_SCOPE)
+nng_sources(tls_common.c)
+nng_sources(tls_api.h)

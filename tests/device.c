@@ -1,5 +1,5 @@
 //
-// Copyright 2018 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -8,13 +8,14 @@
 // found online at https://opensource.org/licenses/MIT.
 //
 
-#include "convey.h"
-#include "nng.h"
-#include "protocol/pair1/pair.h"
-#include "stubs.h"
-#include "supplemental/util/platform.h"
-
 #include <string.h>
+
+#include <nng/nng.h>
+#include <nng/protocol/pair1/pair.h>
+#include <nng/supplemental/util/platform.h>
+
+#include "convey.h"
+#include "stubs.h"
 
 #define APPENDSTR(m, s) nng_msg_append(m, s, strlen(s))
 #define CHECKSTR(m, s)                   \
@@ -105,6 +106,4 @@ Main({
 			});
 		});
 	});
-
-	nng_fini();
 })

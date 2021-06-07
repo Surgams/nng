@@ -1,5 +1,5 @@
 //
-// Copyright 2018 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -8,24 +8,20 @@
 // found online at https://opensource.org/licenses/MIT.
 //
 
-#include "convey.h"
-#include "nng.h"
-#include "trantest.h"
-
-#include "protocol/pubsub0/sub.h"
-
-#include "protocol/pair1/pair.h"
-
-#include "supplemental/util/platform.h"
-
-#include "stubs.h"
-
 #include <string.h>
+
+#include <nng/nng.h>
+#include <nng/protocol/pair1/pair.h>
+#include <nng/protocol/pubsub0/sub.h>
+#include <nng/supplemental/util/platform.h>
+
+#include "convey.h"
+#include "stubs.h"
+#include "trantest.h"
 
 #define SECONDS(x) ((x) *1000)
 
 TestMain("Stats Test", {
-	atexit(nng_fini);
 
 	Convey("We are able to open a PAIR socket", {
 		nng_socket s1;

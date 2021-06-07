@@ -1,5 +1,5 @@
 //
-// Copyright 2018 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -8,14 +8,15 @@
 // found online at https://opensource.org/licenses/MIT.
 //
 
-#include "convey.h"
-#include "nng.h"
-#include "protocol/reqrep0/rep.h"
-#include "protocol/reqrep0/req.h"
-#include "stubs.h"
-#include "supplemental/util/platform.h"
-
 #include <string.h>
+
+#include <nng/nng.h>
+#include <nng/protocol/reqrep0/rep.h>
+#include <nng/protocol/reqrep0/req.h>
+#include <nng/supplemental/util/platform.h>
+
+#include "convey.h"
+#include "stubs.h"
 
 static struct {
 	nng_aio *aio;
@@ -27,10 +28,10 @@ static struct {
 } rep_state;
 
 void
-rep_cb(void *notused)
+rep_cb(void *unused)
 {
 	int rv;
-	(void) notused;
+	(void) unused;
 
 	nng_mtx_lock(rep_state.mtx);
 	if (rep_state.state == START) {
@@ -94,8 +95,6 @@ TestMain("REQ concurrent contexts", {
 	int         i;
 
 	memset(recv_order, 0, NCTX * sizeof(int));
-
-	atexit(nng_fini);
 
 	Convey("We can use REQ contexts concurrently", {
 		nng_socket req;

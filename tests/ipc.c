@@ -1,6 +1,7 @@
 //
-// Copyright 2018 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
+// Copyright 2018 Devolutions <info@devolutions.net>
 //
 // This software is supplied under the terms of the MIT License, a
 // copy of which should be located in the distribution where this
@@ -8,8 +9,6 @@
 // found online at https://opensource.org/licenses/MIT.
 //
 
-#include "convey.h"
-#include "trantest.h"
 #ifdef _WIN32
 #else
 #include <unistd.h>
@@ -18,9 +17,14 @@
 #endif
 #endif
 
-#include "transport/ipc/ipc.h"
+#include <nng/nng.h>
+#include <nng/protocol/reqrep0/req.h>
+#include <nng/transport/ipc/ipc.h>
 
-// Inproc tests.
+#include "convey.h"
+#include "trantest.h"
+
+// IPC tests.
 static int
 check_props(nng_msg *msg)
 {
@@ -59,7 +63,8 @@ check_props(nng_msg *msg)
 	So(nng_pipe_getopt_uint64(p, NNG_OPT_IPC_PEER_GID, &id) == 0);
 	So(id == (uint64_t) getgid());
 
-#if defined(NNG_HAVE_SOPEERCRED) || defined(NNG_HAVE_GETPEERUCRED)
+#if defined(NNG_HAVE_SOPEERCRED) || defined(NNG_HAVE_GETPEERUCRED) || \
+    (defined(NNG_HAVE_LOCALPEERCRED) && defined(NNG_HAVE_LOCALPEERPID))
 	So(nng_pipe_getopt_uint64(p, NNG_OPT_IPC_PEER_PID, &id) == 0);
 	So(id == (uint64_t) getpid());
 #else
@@ -80,6 +85,4 @@ check_props(nng_msg *msg)
 
 TestMain("IPC Transport", {
 	trantest_test_extended("ipc:///tmp/nng_ipc_test_%u", check_props);
-
-	nng_fini();
 })

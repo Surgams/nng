@@ -1,5 +1,5 @@
 //
-// Copyright 2018 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2020 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -24,12 +24,22 @@
 #include <time.h>
 #include <unistd.h>
 
+#ifdef NNG_PLATFORM_OPENBSD
+#include <pthread_np.h>
+#endif
+
+#ifdef NNG_SETSTACKSIZE
+#include <limits.h>
+#include <sys/resource.h>
+#endif
+
 static pthread_mutex_t nni_plat_init_lock = PTHREAD_MUTEX_INITIALIZER;
 static int             nni_plat_inited    = 0;
 static int             nni_plat_forked    = 0;
 
 pthread_condattr_t  nni_cvattr;
 pthread_mutexattr_t nni_mxattr;
+pthread_attr_t      nni_thrattr;
 
 void
 nni_plat_mtx_init(nni_plat_mtx *mtx)
@@ -222,7 +232,7 @@ nni_plat_thr_init(nni_plat_thr *thr, void (*fn)(void *), void *arg)
 	thr->arg  = arg;
 
 	// POSIX wants functions to return a void *, but we don't care.
-	rv = pthread_create(&thr->tid, NULL, nni_plat_thr_main, thr);
+	rv = pthread_create(&thr->tid, &nni_thrattr, nni_plat_thr_main, thr);
 	if (rv != 0) {
 		// nni_printf("pthread_create: %s",
 		// strerror(rv));
@@ -248,6 +258,37 @@ nni_plat_thr_is_self(nni_plat_thr *thr)
 }
 
 void
+nni_plat_thr_set_name(nni_plat_thr *thr, const char *name)
+{
+#if defined(NNG_HAVE_PTHREAD_SETNAME_NP)
+#if defined(__APPLE__)
+	// Darwin is weird, it can only set the name of pthread_self.
+	if ((thr == NULL) || (pthread_self() == thr->tid)) {
+        	pthread_setname_np(name);
+	}
+#elif defined(__NetBSD__)
+	if (thr == NULL) {
+		pthread_setname_np(pthread_self(), "%s", name);
+	} else {
+		pthread_setname_np(thr->tid, "%s", name);
+	}
+#else
+	if (thr == NULL) {
+		pthread_setname_np(pthread_self(), name);
+	} else {
+		pthread_setname_np(thr->tid, name);
+	}
+#endif
+#elif defined(NNG_HAVE_PTHREAD_SET_NAME_NP)
+	if (thr == NULL) {
+		pthread_set_name_np(pthread_self(), name);
+	} else {
+        	pthread_set_name_np(thr->tid, name);
+	}
+#endif
+}
+
+void
 nni_atfork_child(void)
 {
 	nni_plat_forked = 1;
@@ -270,22 +311,39 @@ nni_plat_init(int (*helper)(void))
 		pthread_mutex_unlock(&nni_plat_init_lock);
 		return (0);
 	}
-	if (pthread_condattr_init(&nni_cvattr) != 0) {
+
+	if ((pthread_mutexattr_init(&nni_mxattr) != 0) ||
+	    (pthread_condattr_init(&nni_cvattr) != 0) ||
+	    (pthread_attr_init(&nni_thrattr) != 0)) {
+		// Technically this is leaking, but it should never
+		// occur, so really not worried about it.
 		pthread_mutex_unlock(&nni_plat_init_lock);
 		return (NNG_ENOMEM);
 	}
+
 #if !defined(NNG_USE_GETTIMEOFDAY) && NNG_USE_CLOCKID != CLOCK_REALTIME
 	if (pthread_condattr_setclock(&nni_cvattr, NNG_USE_CLOCKID) != 0) {
 		pthread_mutex_unlock(&nni_plat_init_lock);
+		pthread_mutexattr_destroy(&nni_mxattr);
+		pthread_condattr_destroy(&nni_cvattr);
+		pthread_attr_destroy(&nni_thrattr);
 		return (NNG_ENOMEM);
 	}
 #endif
 
-	if (pthread_mutexattr_init(&nni_mxattr) != 0) {
+#if defined(NNG_SETSTACKSIZE)
+	struct rlimit rl;
+	if ((getrlimit(RLIMIT_STACK, &rl) == 0) &&
+	    (rl.rlim_cur != RLIM_INFINITY) &&
+	    (rl.rlim_cur >= PTHREAD_STACK_MIN) &&
+	    (pthread_attr_setstacksize(&nni_thrattr, rl.rlim_cur) != 0)) {
 		pthread_mutex_unlock(&nni_plat_init_lock);
+		pthread_mutexattr_destroy(&nni_mxattr);
 		pthread_condattr_destroy(&nni_cvattr);
+		pthread_attr_destroy(&nni_thrattr);
 		return (NNG_ENOMEM);
 	}
+#endif
 
 	// if this one fails we don't care.
 	(void) pthread_mutexattr_settype(
@@ -295,6 +353,7 @@ nni_plat_init(int (*helper)(void))
 		pthread_mutex_unlock(&nni_plat_init_lock);
 		pthread_mutexattr_destroy(&nni_mxattr);
 		pthread_condattr_destroy(&nni_cvattr);
+		pthread_attr_destroy(&nni_thrattr);
 		return (rv);
 	}
 
@@ -303,6 +362,7 @@ nni_plat_init(int (*helper)(void))
 		nni_posix_pollq_sysfini();
 		pthread_mutexattr_destroy(&nni_mxattr);
 		pthread_condattr_destroy(&nni_cvattr);
+		pthread_attr_destroy(&nni_thrattr);
 		return (rv);
 	}
 
@@ -312,6 +372,7 @@ nni_plat_init(int (*helper)(void))
 		nni_posix_pollq_sysfini();
 		pthread_mutexattr_destroy(&nni_mxattr);
 		pthread_condattr_destroy(&nni_cvattr);
+		pthread_attr_destroy(&nni_thrattr);
 		return (NNG_ENOMEM);
 	}
 	if ((rv = helper()) == 0) {

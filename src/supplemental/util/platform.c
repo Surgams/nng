@@ -1,5 +1,5 @@
 //
-// Copyright 2018 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2020 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -12,7 +12,7 @@
 #include <string.h>
 
 #include "core/nng_impl.h"
-#include "supplemental/util/platform.h"
+#include "nng/supplemental/util/platform.h"
 
 nng_time
 nng_clock(void)
@@ -44,7 +44,6 @@ nng_thread_create(nng_thread **thrp, void (*func)(void *), void *arg)
 	if ((thr = NNI_ALLOC_STRUCT(thr)) == NULL) {
 		return (NNG_ENOMEM);
 	}
-	memset(thr, 0, sizeof(*thr));
 	*thrp = (void *) thr;
 	if ((rv = nni_thr_init(thr, func, arg)) != 0) {
 		return (rv);
@@ -53,12 +52,18 @@ nng_thread_create(nng_thread **thrp, void (*func)(void *), void *arg)
 	return (0);
 }
 
+void
+nng_thread_set_name(nng_thread *thr, const char *name)
+{
+	nni_thr_set_name((void *)thr, name);
+}
+
 // Destroy a thread (waiting for it to complete.)  When this function
 // returns all resources for the thread are cleaned up.
 void
-nng_thread_destroy(nng_thread *thrp)
+nng_thread_destroy(nng_thread *thr)
 {
-	nni_thr *t = (void *) thrp;
+	nni_thr *t = (void *) thr;
 	nni_thr_fini(t);
 	NNI_FREE_STRUCT(t);
 }
@@ -156,5 +161,6 @@ nng_cv_wake1(nng_cv *cv)
 uint32_t
 nng_random(void)
 {
+	(void) nni_init();
 	return (nni_random());
 }

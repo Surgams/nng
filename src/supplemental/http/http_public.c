@@ -9,9 +9,9 @@
 //
 
 #include "core/nng_impl.h"
-#include "http.h"
 #include "http_api.h"
-#include "supplemental/tls/tls.h"
+#include "nng/supplemental/http/http.h"
+#include "nng/supplemental/tls/tls.h"
 
 // Symbols in this file are "public" versions of the HTTP API.
 // These are suitable for exposure to applications.
@@ -559,6 +559,21 @@ nng_http_handler_alloc_directory(
 }
 
 int
+nng_http_handler_alloc_redirect(
+    nng_http_handler **hp, const char *uri, uint16_t status, const char *where)
+{
+#ifdef NNG_SUPP_HTTP
+	return (nni_http_handler_init_redirect(hp, uri, status, where));
+#else
+	NNI_ARG_UNUSED(hp);
+	NNI_ARG_UNUSED(uri);
+	NNI_ARG_UNUSED(status);
+	NNI_ARG_UNUSED(where);
+	return (NNG_ENOTSUP);
+#endif
+}
+
+int
 nng_http_handler_alloc_static(nng_http_handler **hp, const char *uri,
     const void *data, size_t size, const char *ctype)
 {
@@ -587,6 +602,20 @@ nng_http_handler_set_method(nng_http_handler *h, const char *meth)
 }
 
 int
+nng_http_handler_collect_body(nng_http_handler *h, bool want, size_t len)
+{
+#ifdef NNG_SUPP_HTTP
+	nni_http_handler_collect_body(h, want, len);
+	return (0);
+#else
+	NNI_ARG_UNUSED(h);
+	NNI_ARG_UNUSED(want);
+	NNI_ARG_UNUSED(len);
+	return (NNG_ENOTSUP);
+#endif
+}
+
+int
 nng_http_handler_set_host(nng_http_handler *h, const char *host)
 {
 #ifdef NNG_SUPP_HTTP
@@ -603,6 +632,17 @@ nng_http_handler_set_tree(nng_http_handler *h)
 {
 #ifdef NNG_SUPP_HTTP
 	return (nni_http_handler_set_tree(h));
+#else
+	NNI_ARG_UNUSED(h);
+	return (NNG_ENOTSUP);
+#endif
+}
+
+int
+nng_http_handler_set_tree_exclusive(nng_http_handler *h)
+{
+#ifdef NNG_SUPP_HTTP
+	return (nni_http_handler_set_tree_exclusive(h));
 #else
 	NNI_ARG_UNUSED(h);
 	return (NNG_ENOTSUP);
@@ -742,13 +782,29 @@ nng_http_server_set_tls(nng_http_server *srv, struct nng_tls_config *cfg)
 }
 
 int
-nng_http_server_get_tls(nng_http_server *srv, struct nng_tls_config **cfgp)
+nng_http_server_get_tls(nng_http_server *srv, struct nng_tls_config **cfg)
 {
 #if defined(NNG_SUPP_HTTP) && defined(NNG_SUPP_TLS)
-	return (nni_http_server_get_tls(srv, cfgp));
+	return (nni_http_server_get_tls(srv, cfg));
 #else
 	NNI_ARG_UNUSED(srv);
-	NNI_ARG_UNUSED(cfgp);
+	NNI_ARG_UNUSED(cfg);
+	return (NNG_ENOTSUP);
+#endif
+}
+
+int
+nng_http_server_get_addr(nng_http_server *srv, nng_sockaddr *addr)
+{
+#ifdef NNG_SUPP_HTTP
+	size_t size = sizeof(nng_sockaddr);
+	if (srv == NULL || addr == NULL)
+		return NNG_EINVAL;
+	return (nni_http_server_get(
+	    srv, NNG_OPT_LOCADDR, addr, &size, NNI_TYPE_SOCKADDR));
+#else
+	NNI_ARG_UNUSED(srv);
+	NNI_ARG_UNUSED(addr);
 	return (NNG_ENOTSUP);
 #endif
 }
@@ -873,6 +929,8 @@ nng_http_req_reset(nng_http_req *req)
 {
 #ifdef NNG_SUPP_HTTP
 	nni_http_req_reset(req);
+#else
+	NNI_ARG_UNUSED(req);
 #endif
 }
 
@@ -881,5 +939,7 @@ nng_http_res_reset(nng_http_res *res)
 {
 #ifdef NNG_SUPP_HTTP
 	nni_http_res_reset(res);
+#else
+	NNI_ARG_UNUSED(res);
 #endif
 }

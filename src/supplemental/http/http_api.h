@@ -1,6 +1,7 @@
 //
-// Copyright 2018 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2019 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
+// Copyright 2019 Devolutions <info@devolutions.net>
 //
 // This software is supplied under the terms of the MIT License, a
 // copy of which should be located in the distribution where this
@@ -12,9 +13,8 @@
 #define NNG_SUPPLEMENTAL_HTTP_HTTP_API_H
 
 #include "core/nng_impl.h"
-#include "supplemental/tls/tls.h"
-
-#include "supplemental/http/http.h"
+#include <nng/supplemental/http/http.h>
+#include <nng/supplemental/tls/tls.h>
 
 // This represents the "internal" HTTP API.  It should not be used
 // or exposed to applications directly.
@@ -27,6 +27,8 @@ typedef struct nng_http_conn    nni_http_conn;
 typedef struct nng_http_handler nni_http_handler;
 typedef struct nng_http_server  nni_http_server;
 typedef struct nng_http_client  nni_http_client;
+typedef struct nng_http_chunk   nni_http_chunk;
+typedef struct nng_http_chunks  nni_http_chunks;
 
 // These functions are private to the internal framework, and really should
 // not be used elsewhere.
@@ -45,6 +47,33 @@ extern int   nni_http_res_get_buf(nni_http_res *, void **, size_t *);
 extern int   nni_http_res_parse(nni_http_res *, void *, size_t, size_t *);
 extern void  nni_http_res_get_data(nni_http_res *, void **, size_t *);
 extern char *nni_http_res_headers(nni_http_res *);
+
+// Chunked transfer encoding.  For the moment this is not part of our public
+// API.  We can change that later.
+
+// nni_http_chunk_list_init creates a list of chunks, which shall not exceed
+// the specified overall size.  (Size 0 means no limit.)
+extern int nni_http_chunks_init(nni_http_chunks **, size_t);
+
+extern void nni_http_chunks_free(nni_http_chunks *);
+
+// nni_http_chunk_iter iterates over all chunks in the list.
+// Pass NULL for the last chunk to start at the head.  Returns NULL when done.
+extern nni_http_chunk *nni_http_chunks_iter(
+    nni_http_chunks *, nni_http_chunk *);
+
+// nni_http_chunk_list_size returns the combined size of all chunks in list.
+extern size_t nni_http_chunks_size(nni_http_chunks *);
+
+// nni_http_chunk_size returns the size of given chunk.
+extern size_t nni_http_chunk_size(nni_http_chunk *);
+// nni_http_chunk_data returns a pointer to the data.
+extern void *nni_http_chunk_data(nni_http_chunk *);
+
+extern int nni_http_chunks_parse(nni_http_chunks *, void *, size_t, size_t *);
+
+extern void nni_http_read_chunks(
+    nni_http_conn *, nni_http_chunks *, nni_aio *);
 
 // Private to the server. (Used to support session hijacking.)
 extern void  nni_http_conn_set_ctx(nni_http_conn *, void *);
@@ -67,12 +96,14 @@ extern void *nni_http_conn_get_ctx(nni_http_conn *);
 // These initialization functions create stream for HTTP transactions.
 // They should only be used by the server or client HTTP implementations,
 // and are not for use by other code.
-extern int nni_http_conn_init_tcp(nni_http_conn **, nni_tcp_conn *);
-extern int nni_http_conn_init_tls(
-    nni_http_conn **, struct nng_tls_config *, nni_tcp_conn *);
+extern int nni_http_conn_init(nni_http_conn **, nng_stream *);
 
 extern void nni_http_conn_close(nni_http_conn *);
 extern void nni_http_conn_fini(nni_http_conn *);
+extern int  nni_http_conn_getopt(
+     nni_http_conn *, const char *, void *, size_t *, nni_type);
+extern int nni_http_conn_setopt(
+    nni_http_conn *, const char *, const void *, size_t, nni_type);
 
 // Reading messages -- the caller must supply a preinitialized (but otherwise
 // idle) message.  We recommend the caller store this in the aio's user data.
@@ -101,6 +132,7 @@ extern int nni_http_req_copy_data(nni_http_req *, const void *, size_t);
 extern int nni_http_res_copy_data(nni_http_res *, const void *, size_t);
 extern int nni_http_req_set_data(nni_http_req *, const void *, size_t);
 extern int nni_http_res_set_data(nni_http_res *, const void *, size_t);
+extern int nni_http_req_alloc_data(nni_http_req *, size_t);
 extern int nni_http_res_alloc_data(nni_http_res *, size_t);
 extern const char *nni_http_req_get_method(nni_http_req *);
 extern const char *nni_http_req_get_version(nni_http_req *);
@@ -120,15 +152,17 @@ extern int         nni_http_res_set_reason(nni_http_res *, const char *);
 // the HTML body with customized content if it exists.
 extern bool nni_http_res_is_error(nni_http_res *);
 
+// nni_http_alloc_html_error allocates a string corresponding to an
+// HTML error.  This can be set as the body of the res.  The status
+// will be looked up using HTTP status code lookups, but the details
+// will be added if present as further body text.  The result can
+// be freed with nni_strfree() later.
+extern int nni_http_alloc_html_error(char **, uint16_t, const char *);
+
 extern void nni_http_read(nni_http_conn *, nni_aio *);
 extern void nni_http_read_full(nni_http_conn *, nni_aio *);
 extern void nni_http_write(nni_http_conn *, nni_aio *);
 extern void nni_http_write_full(nni_http_conn *, nni_aio *);
-extern int  nni_http_sock_addr(nni_http_conn *, nni_sockaddr *);
-extern int  nni_http_peer_addr(nni_http_conn *, nni_sockaddr *);
-
-// nni_http_tls_verified returns true if the peer has been verified using TLS.
-extern bool nni_http_tls_verified(nni_http_conn *);
 
 // nni_http_server will look for an existing server with the same
 // name and port, or create one if one does not exist.  The servers
@@ -170,6 +204,11 @@ extern int nni_http_server_set_tls(nni_http_server *, struct nng_tls_config *);
 // nni_http_server_set_tls function is called, so be careful.
 extern int nni_http_server_get_tls(
     nni_http_server *, struct nng_tls_config **);
+
+extern int nni_http_server_set(
+    nni_http_server *, const char *, const void *, size_t, nni_type);
+extern int nni_http_server_get(
+    nni_http_server *, const char *, void *, size_t *, nni_type);
 
 // nni_http_server_start starts listening on the supplied port.
 extern int nni_http_server_start(nni_http_server *);
@@ -213,7 +252,7 @@ extern int nni_http_hijack(nni_http_conn *);
 //
 // The callback function will receive the following arguments (via
 // nng_aio_get_input(): nni_http_request *, nni_http_handler *, and
-// nni_http_context_t *.  The first is a request object, for convenience.
+// nni_http_conn_t *.  The first is a request object, for convenience.
 // The second is the handler, from which the callback can obtain any other
 // data it has set.  The final is the http context, from which its possible
 // to hijack the session.
@@ -243,15 +282,31 @@ extern int nni_http_handler_init_directory(
 extern int nni_http_handler_init_static(
     nni_http_handler **, const char *, const void *, size_t, const char *);
 
+// nni_http_handler_init_redirect creates a handler that redirects the request.
+extern int nni_http_handler_init_redirect(
+    nni_http_handler **, const char *, uint16_t, const char *);
+
 // nni_http_handler_fini destroys a handler.  This should only be done before
 // the handler is added, or after it is deleted.  The server automatically
 // calls this for any handlers still registered with it if it is destroyed.
 extern void nni_http_handler_fini(nni_http_handler *);
 
+// nni_http_handler_collect_body informs the server that it should collect
+// the entitty data associated with the client request, and sets the maximum
+// size to accept.
+extern void nni_http_handler_collect_body(nni_http_handler *, bool, size_t);
+
 // nni_http_handler_set_tree marks the handler as servicing the entire
 // tree (e.g. a directory), rather than just a leaf node.  The handler
 // will probably need to inspect the URL of the request.
 extern int nni_http_handler_set_tree(nni_http_handler *);
+
+// nni_http_handler_set_tree_exclusive marks the handler as servicing the
+// entire tree (e.g. a directory) exclusively, rather than just a leaf node.
+// When servicing a tree exclusively, other handlers sharing parts of the uri
+// will induce an address conflict when adding them to a server. The handler
+// will probably need to inspect the URL of the request.
+extern int nni_http_handler_set_tree_exclusive(nni_http_handler *);
 
 // nni_http_handler_set_host limits the handler to only being called for
 // the given Host: field.  This can be used to set up multiple virtual
@@ -281,8 +336,7 @@ extern int nni_http_handler_set_method(nni_http_handler *, const char *);
 extern int nni_http_handler_set_data(nni_http_handler *, void *, nni_cb);
 
 // nni_http_handler_get_data returns the data that was previously stored
-// at that index.  It returns NULL if no data was set, or an invalid index
-// is supplied.
+// by nni_http_handler_set_data.
 extern void *nni_http_handler_get_data(nni_http_handler *);
 
 // nni_http_handler_get_uri returns the URI set on the handler.
@@ -305,6 +359,11 @@ extern int nni_http_client_set_tls(nni_http_client *, struct nng_tls_config *);
 extern int nni_http_client_get_tls(
     nni_http_client *, struct nng_tls_config **);
 
+extern int nni_http_client_set(
+    nni_http_client *, const char *, const void *buf, size_t, nni_type);
+extern int nni_http_client_get(
+    nni_http_client *, const char *, void *, size_t *, nni_type);
+
 extern void nni_http_client_connect(nni_http_client *, nni_aio *);
 
 // nni_http_transact_conn is used to perform a round-trip exchange (i.e. a
@@ -322,5 +381,9 @@ extern void nni_http_transact_conn(
 // to reply with a chunked transfer encoding.
 extern void nni_http_transact(
     nni_http_client *, nni_http_req *, nni_http_res *, nni_aio *);
+
+// nni_http_stream_scheme returns the underlying stream scheme for a given
+// upper layer scheme.
+extern const char *nni_http_stream_scheme(const char *);
 
 #endif // NNG_SUPPLEMENTAL_HTTP_HTTP_API_H

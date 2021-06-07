@@ -1,5 +1,5 @@
 //
-// Copyright 2017 Garrett D'Amore <garrett@damore.org>
+// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2017 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -9,12 +9,12 @@
 //
 
 #include "convey.h"
-#include "core/nng_impl.h"
 #include "trantest.h"
+
+#include "core/nng_impl.h"
 
 // Inproc tests.
 
 TestMain("Inproc Transport", {
 	trantest_test_all("inproc://TEST_%u");
-	nng_fini();
 })

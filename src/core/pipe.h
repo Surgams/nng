@@ -1,5 +1,5 @@
 //
-// Copyright 2018 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2019 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -42,10 +42,6 @@ extern uint16_t nni_pipe_peer(nni_pipe *);
 extern int nni_pipe_getopt(
     nni_pipe *, const char *, void *, size_t *, nni_opt_type);
 
-// nni_pipe_get_proto_data gets the protocol private data set with the
-// nni_pipe_set_proto_data function.  No locking is performed.
-extern void *nni_pipe_get_proto_data(nni_pipe *);
-
 // nni_pipe_find finds a pipe given its ID.  It places a hold on the
 // pipe, which must be released by the caller when it is done.
 extern int nni_pipe_find(nni_pipe **, uint32_t);
@@ -63,6 +59,10 @@ extern uint32_t nni_pipe_dialer_id(nni_pipe *);
 extern void nni_pipe_rele(nni_pipe *);
 
 // nni_pipe_add_stat adds a statistic to the pipe
-extern void nni_pipe_add_stat(nni_pipe *p, nni_stat_item *);
+extern void nni_pipe_add_stat(nni_pipe *, nni_stat_item *);
+
+extern void nni_pipe_bump_rx(nni_pipe *, size_t);
+extern void nni_pipe_bump_tx(nni_pipe *, size_t);
+extern void nni_pipe_bump_error(nni_pipe *, int);
 
 #endif // CORE_PIPE_H

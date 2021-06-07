@@ -1,6 +1,7 @@
 //
-// Copyright 2018 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2020 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
+// Copyright 2019 Devolutions <info@devolutions.net>
 //
 // This software is supplied under the terms of the MIT License, a
 // copy of which should be located in the distribution where this
@@ -8,14 +9,16 @@
 // found online at https://opensource.org/licenses/MIT.
 //
 
+#include <ctype.h>
 #include <stdbool.h>
 #include <string.h>
 
 #include "core/nng_impl.h"
-#include "supplemental/tls/tls.h"
 #include "supplemental/tls/tls_api.h"
 
 #include "http_api.h"
+
+#include <nng/supplemental/tls/tls.h>
 
 // We insist that individual headers fit in 8K.
 // If you need more than that, you need something we can't do.
@@ -27,6 +30,7 @@ enum read_flavor {
 	HTTP_RD_FULL,
 	HTTP_RD_REQ,
 	HTTP_RD_RES,
+	HTTP_RD_CHUNK,
 };
 
 enum write_flavor {
@@ -36,23 +40,6 @@ enum write_flavor {
 	HTTP_WR_RES,
 };
 
-typedef void (*http_read_fn)(void *, nni_aio *);
-typedef void (*http_write_fn)(void *, nni_aio *);
-typedef void (*http_close_fn)(void *);
-typedef void (*http_fini_fn)(void *);
-typedef bool (*http_verified_fn)(void *);
-typedef int (*http_addr_fn)(void *, nni_sockaddr *);
-
-typedef struct nni_http_tran {
-	http_read_fn     h_read;
-	http_write_fn    h_write;
-	http_addr_fn     h_sock_addr;
-	http_addr_fn     h_peer_addr;
-	http_verified_fn h_verified;
-	http_close_fn    h_close;
-	http_fini_fn     h_fini;
-} nni_http_tran;
-
 #define SET_RD_FLAVOR(aio, f) \
 	nni_aio_set_prov_extra(aio, 0, ((void *) (intptr_t)(f)))
 #define GET_RD_FLAVOR(aio) (int) ((intptr_t) nni_aio_get_prov_extra(aio, 0))
@@ -61,18 +48,11 @@ typedef struct nni_http_tran {
 #define GET_WR_FLAVOR(aio) (int) ((intptr_t) nni_aio_get_prov_extra(aio, 0))
 
 struct nng_http_conn {
-	void *           sock;
-	http_read_fn     rd;
-	http_write_fn    wr;
-	http_addr_fn     sock_addr;
-	http_addr_fn     peer_addr;
-	http_verified_fn verified;
-	http_close_fn    close;
-	http_fini_fn     fini;
-	void *           ctx;
-	bool             closed;
-	nni_list         rdq; // high level http read requests
-	nni_list         wrq; // high level http write requests
+	nng_stream *sock;
+	void *      ctx;
+	bool        closed;
+	nni_list    rdq; // high level http read requests
+	nni_list    wrq; // high level http write requests
 
 	nni_aio *rd_uaio; // user aio for read
 	nni_aio *wr_uaio; // user aio for write
@@ -85,6 +65,7 @@ struct nng_http_conn {
 	size_t   rd_get;
 	size_t   rd_put;
 	size_t   rd_bufsz;
+	bool     rd_buffered;
 };
 
 void
@@ -133,7 +114,7 @@ http_close(nni_http_conn *conn)
 	}
 
 	if (conn->sock != NULL) {
-		conn->close(conn->sock);
+		nng_stream_close(conn->sock);
 	}
 }
 
@@ -155,7 +136,7 @@ http_rd_buf(nni_http_conn *conn, nni_aio *aio)
 	int      rv;
 	bool     raw = false;
 	nni_iov *iov;
-	unsigned niov;
+	unsigned nio;
 
 	rbuf += conn->rd_get;
 
@@ -163,8 +144,8 @@ http_rd_buf(nni_http_conn *conn, nni_aio *aio)
 	case HTTP_RD_RAW:
 		raw = true; // FALLTHROUGH
 	case HTTP_RD_FULL:
-		nni_aio_get_iov(aio, &niov, &iov);
-		while ((niov != 0) && (cnt != 0)) {
+		nni_aio_get_iov(aio, &nio, &iov);
+		while ((nio != 0) && (cnt != 0)) {
 			// Pull up data from the buffer if possible.
 			n = iov[0].iov_len;
 			if (n > cnt) {
@@ -179,14 +160,14 @@ http_rd_buf(nni_http_conn *conn, nni_aio *aio)
 			cnt -= n;
 
 			if (iov[0].iov_len == 0) {
-				niov--;
+				nio--;
 				iov = &iov[1];
 			}
 		}
 
-		nni_aio_set_iov(aio, niov, iov);
+		nni_aio_set_iov(aio, nio, iov);
 
-		if ((niov == 0) || (raw && (nni_aio_count(aio) != 0))) {
+		if ((nio == 0) || (raw && (nni_aio_count(aio) != 0))) {
 			// Finished the read.  (We are finished if we either
 			// got *all* the data, or we got *some* data for
 			// a raw read.)
@@ -197,9 +178,9 @@ http_rd_buf(nni_http_conn *conn, nni_aio *aio)
 		// (Note that we get here if we either have not completed
 		// a full transaction on a FULL read, or were not even able
 		// to get *any* data for a partial RAW read.)
-		nni_aio_set_data(conn->rd_aio, 1, NULL);
-		nni_aio_set_iov(conn->rd_aio, niov, iov);
-		conn->rd(conn->sock, conn->rd_aio);
+		conn->rd_buffered = false;
+		nni_aio_set_iov(conn->rd_aio, nio, iov);
+		nng_stream_recv(conn->sock, conn->rd_aio);
 		return (NNG_EAGAIN);
 
 	case HTTP_RD_REQ:
@@ -211,11 +192,11 @@ http_rd_buf(nni_http_conn *conn, nni_aio *aio)
 		}
 		if (rv == NNG_EAGAIN) {
 			nni_iov iov1;
-			iov1.iov_buf = conn->rd_buf + conn->rd_put;
-			iov1.iov_len = conn->rd_bufsz - conn->rd_put;
+			iov1.iov_buf      = conn->rd_buf + conn->rd_put;
+			iov1.iov_len      = conn->rd_bufsz - conn->rd_put;
+			conn->rd_buffered = true;
 			nni_aio_set_iov(conn->rd_aio, 1, &iov1);
-			nni_aio_set_data(conn->rd_aio, 1, aio);
-			conn->rd(conn->sock, conn->rd_aio);
+			nng_stream_recv(conn->sock, conn->rd_aio);
 		}
 		return (rv);
 
@@ -228,11 +209,28 @@ http_rd_buf(nni_http_conn *conn, nni_aio *aio)
 		}
 		if (rv == NNG_EAGAIN) {
 			nni_iov iov1;
-			iov1.iov_buf = conn->rd_buf + conn->rd_put;
-			iov1.iov_len = conn->rd_bufsz - conn->rd_put;
+			iov1.iov_buf      = conn->rd_buf + conn->rd_put;
+			iov1.iov_len      = conn->rd_bufsz - conn->rd_put;
+			conn->rd_buffered = true;
 			nni_aio_set_iov(conn->rd_aio, 1, &iov1);
-			nni_aio_set_data(conn->rd_aio, 1, aio);
-			conn->rd(conn->sock, conn->rd_aio);
+			nng_stream_recv(conn->sock, conn->rd_aio);
+		}
+		return (rv);
+
+	case HTTP_RD_CHUNK:
+		rv = nni_http_chunks_parse(
+		    nni_aio_get_prov_extra(aio, 1), rbuf, cnt, &n);
+		conn->rd_get += n;
+		if (conn->rd_get == conn->rd_put) {
+			conn->rd_get = conn->rd_put = 0;
+		}
+		if (rv == NNG_EAGAIN) {
+			nni_iov iov1;
+			iov1.iov_buf      = conn->rd_buf + conn->rd_put;
+			iov1.iov_len      = conn->rd_bufsz - conn->rd_put;
+			conn->rd_buffered = true;
+			nni_aio_set_iov(conn->rd_aio, 1, &iov1);
+			nng_stream_recv(conn->sock, conn->rd_aio);
 		}
 		return (rv);
 	}
@@ -302,7 +300,7 @@ http_rd_cb(void *arg)
 	cnt = nni_aio_count(aio);
 
 	// If we were reading into the buffer, then advance location(s).
-	if ((uaio = nni_aio_get_data(aio, 1)) != NULL) {
+	if (conn->rd_buffered) {
 		conn->rd_put += cnt;
 		NNI_ASSERT(conn->rd_put <= conn->rd_bufsz);
 		http_rd_start(conn);
@@ -406,7 +404,7 @@ http_wr_start(nni_http_conn *conn)
 
 	nni_aio_get_iov(aio, &niov, &iov);
 	nni_aio_set_iov(conn->wr_aio, niov, iov);
-	conn->wr(conn->sock, conn->wr_aio);
+	nng_stream_send(conn->sock, conn->wr_aio);
 }
 
 static void
@@ -453,7 +451,7 @@ http_wr_cb(void *arg)
 	if (nni_aio_iov_count(aio) > 0) {
 		// We have more to transmit - start another and leave
 		// (we will get called again when it is done).
-		conn->wr(conn->sock, aio);
+		nng_stream_send(conn->sock, aio);
 		nni_mtx_unlock(&conn->mtx);
 		return;
 	}
@@ -531,6 +529,17 @@ nni_http_read_res(nni_http_conn *conn, nni_http_res *res, nni_aio *aio)
 }
 
 void
+nni_http_read_chunks(nni_http_conn *conn, nni_http_chunks *cl, nni_aio *aio)
+{
+	SET_RD_FLAVOR(aio, HTTP_RD_CHUNK);
+	nni_aio_set_prov_extra(aio, 1, cl);
+
+	nni_mtx_lock(&conn->mtx);
+	http_rd_submit(conn, aio);
+	nni_mtx_unlock(&conn->mtx);
+}
+
+void
 nni_http_read_full(nni_http_conn *conn, nni_aio *aio)
 {
 	SET_RD_FLAVOR(aio, HTTP_RD_FULL);
@@ -594,22 +603,22 @@ nni_http_write_res(nni_http_conn *conn, nni_http_res *res, nni_aio *aio)
 	void *  data;
 	size_t  size;
 	nni_iov iov[2];
-	int     niov;
+	int     nio;
 
 	if ((rv = nni_http_res_get_buf(res, &buf, &bufsz)) != 0) {
 		nni_aio_finish_error(aio, rv);
 		return;
 	}
 	nni_http_res_get_data(res, &data, &size);
-	niov           = 1;
+	nio            = 1;
 	iov[0].iov_len = bufsz;
 	iov[0].iov_buf = buf;
 	if ((size > 0) && (data != NULL)) {
-		niov++;
+		nio++;
 		iov[1].iov_len = size;
 		iov[1].iov_buf = data;
 	}
-	nni_aio_set_iov(aio, niov, iov);
+	nni_aio_set_iov(aio, nio, iov);
 
 	SET_WR_FLAVOR(aio, HTTP_WR_RES);
 
@@ -639,32 +648,31 @@ nni_http_write_full(nni_http_conn *conn, nni_aio *aio)
 }
 
 int
-nni_http_sock_addr(nni_http_conn *conn, nni_sockaddr *sa)
+nni_http_conn_getopt(
+    nni_http_conn *conn, const char *name, void *buf, size_t *szp, nni_type t)
 {
 	int rv;
 	nni_mtx_lock(&conn->mtx);
-	rv = conn->closed ? NNG_ECLOSED : conn->sock_addr(conn->sock, sa);
+	if (conn->closed) {
+		rv = NNG_ECLOSED;
+	} else {
+		rv = nni_stream_get(conn->sock, name, buf, szp, t);
+	}
 	nni_mtx_unlock(&conn->mtx);
 	return (rv);
 }
 
 int
-nni_http_peer_addr(nni_http_conn *conn, nni_sockaddr *sa)
+nni_http_conn_setopt(nni_http_conn *conn, const char *name, const void *buf,
+    size_t sz, nni_type t)
 {
 	int rv;
 	nni_mtx_lock(&conn->mtx);
-	rv = conn->closed ? NNG_ECLOSED : conn->peer_addr(conn->sock, sa);
-	nni_mtx_unlock(&conn->mtx);
-	return (rv);
-}
-
-bool
-nni_http_tls_verified(nni_http_conn *conn)
-{
-	bool rv;
-
-	nni_mtx_lock(&conn->mtx);
-	rv = conn->closed ? false : conn->verified(conn->sock);
+	if (conn->closed) {
+		rv = NNG_ECLOSED;
+	} else {
+		rv = nni_stream_set(conn->sock, name, buf, sz, t);
+	}
 	nni_mtx_unlock(&conn->mtx);
 	return (rv);
 }
@@ -677,21 +685,21 @@ nni_http_conn_fini(nni_http_conn *conn)
 
 	nni_mtx_lock(&conn->mtx);
 	http_close(conn);
-	if ((conn->sock != NULL) && (conn->fini != NULL)) {
-		conn->fini(conn->sock);
+	if (conn->sock != NULL) {
+		nng_stream_free(conn->sock);
 		conn->sock = NULL;
 	}
 	nni_mtx_unlock(&conn->mtx);
 
-	nni_aio_fini(conn->wr_aio);
-	nni_aio_fini(conn->rd_aio);
+	nni_aio_free(conn->wr_aio);
+	nni_aio_free(conn->rd_aio);
 	nni_free(conn->rd_buf, conn->rd_bufsz);
 	nni_mtx_fini(&conn->mtx);
 	NNI_FREE_STRUCT(conn);
 }
 
 static int
-http_init(nni_http_conn **connp, nni_http_tran *tran, void *data)
+http_init(nni_http_conn **connp, nng_stream *data)
 {
 	nni_http_conn *conn;
 	int            rv;
@@ -709,89 +717,25 @@ http_init(nni_http_conn **connp, nni_http_tran *tran, void *data)
 	}
 	conn->rd_bufsz = HTTP_BUFSIZE;
 
-	if (((rv = nni_aio_init(&conn->wr_aio, http_wr_cb, conn)) != 0) ||
-	    ((rv = nni_aio_init(&conn->rd_aio, http_rd_cb, conn)) != 0)) {
+	if (((rv = nni_aio_alloc(&conn->wr_aio, http_wr_cb, conn)) != 0) ||
+	    ((rv = nni_aio_alloc(&conn->rd_aio, http_rd_cb, conn)) != 0)) {
 		nni_http_conn_fini(conn);
 		return (rv);
 	}
 
-	conn->sock      = data;
-	conn->rd        = tran->h_read;
-	conn->wr        = tran->h_write;
-	conn->close     = tran->h_close;
-	conn->fini      = tran->h_fini;
-	conn->sock_addr = tran->h_sock_addr;
-	conn->peer_addr = tran->h_peer_addr;
-	conn->verified  = tran->h_verified;
+	conn->sock = data;
 
 	*connp = conn;
 
 	return (0);
 }
 
-static bool
-nni_http_verified_tcp(void *arg)
-{
-	NNI_ARG_UNUSED(arg);
-	return (false);
-}
-
-static nni_http_tran http_tcp_ops = {
-	.h_read      = (http_read_fn) nni_tcp_conn_recv,
-	.h_write     = (http_write_fn) nni_tcp_conn_send,
-	.h_close     = (http_close_fn) nni_tcp_conn_close,
-	.h_fini      = (http_fini_fn) nni_tcp_conn_fini,
-	.h_sock_addr = (http_addr_fn) nni_tcp_conn_sockname,
-	.h_peer_addr = (http_addr_fn) nni_tcp_conn_peername,
-	.h_verified  = (http_verified_fn) nni_http_verified_tcp,
-};
-
 int
-nni_http_conn_init_tcp(nni_http_conn **connp, nni_tcp_conn *tcp)
+nni_http_conn_init(nni_http_conn **connp, nng_stream *stream)
 {
 	int rv;
-	if ((rv = http_init(connp, &http_tcp_ops, tcp)) != 0) {
-		nni_tcp_conn_fini(tcp);
+	if ((rv = http_init(connp, stream)) != 0) {
+		nng_stream_free(stream);
 	}
 	return (rv);
 }
-
-#ifdef NNG_SUPP_TLS
-static nni_http_tran http_tls_ops = {
-	.h_read      = (http_read_fn) nni_tls_recv,
-	.h_write     = (http_write_fn) nni_tls_send,
-	.h_close     = (http_close_fn) nni_tls_close,
-	.h_fini      = (http_fini_fn) nni_tls_fini,
-	.h_sock_addr = (http_addr_fn) nni_tls_sockname,
-	.h_peer_addr = (http_addr_fn) nni_tls_peername,
-	.h_verified  = (http_verified_fn) nni_tls_verified,
-};
-
-int
-nni_http_conn_init_tls(
-    nni_http_conn **connp, struct nng_tls_config *cfg, nni_tcp_conn *tcp)
-{
-	nni_tls *tls;
-	int      rv;
-
-	if ((rv = nni_tls_init(&tls, cfg, tcp)) != 0) {
-		nni_tcp_conn_fini(tcp);
-		return (rv);
-	}
-
-	if ((rv = http_init(connp, &http_tls_ops, tls)) != 0) {
-		nni_tls_fini(tls);
-	}
-	return (rv);
-}
-#else
-int
-nni_http_conn_init_tls(
-    nni_http_conn **connp, struct nng_tls_config *cfg, nni_tcp_conn *tcp)
-{
-	NNI_ARG_UNUSED(connp);
-	NNI_ARG_UNUSED(cfg);
-	nni_tcp_conn_fini(tcp);
-	return (NNG_ENOTSUP);
-}
-#endif // NNG_SUPP_TLS

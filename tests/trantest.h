@@ -32,7 +32,7 @@ struct trantest {
 	char        addr[NNG_MAXADDRLEN + 1];
 	nng_socket  reqsock;
 	nng_socket  repsock;
-	nni_tran *  tran;
+	nni_sp_tran *  tran;
 	int (*init)(struct trantest *);
 	void (*fini)(struct trantest *);
 	int (*dialer_init)(nng_dialer);
@@ -123,7 +123,7 @@ trantest_init(trantest *tt, const char *addr)
 
 	nng_url *url;
 	So(nng_url_parse(&url, tt->addr) == 0);
-	tt->tran = nni_tran_find(url);
+	tt->tran = nni_sp_tran_find(url);
 	So(tt->tran != NULL);
 	nng_url_free(url);
 }

@@ -99,10 +99,9 @@ static nni_reap_list tlstran_pipe_reap_list = {
 	.rl_func   = tlstran_pipe_fini,
 };
 
-static int
+static void
 tlstran_init(void)
 {
-	return (0);
 }
 
 static void
@@ -688,7 +687,7 @@ tlstran_url_parse_source(nni_url *url, nng_sockaddr *sa, const nni_url *surl)
 		return (0);
 	}
 
-	len             = (size_t)(semi - url->u_hostname);
+	len             = (size_t) (semi - url->u_hostname);
 	url->u_hostname = semi + 1;
 
 	if (strcmp(surl->u_scheme, "tls+tcp") == 0) {
@@ -1146,7 +1145,7 @@ tlstran_pipe_getopt(
 	return (rv);
 }
 
-static nni_tran_pipe_ops tlstran_pipe_ops = {
+static nni_sp_pipe_ops tlstran_pipe_ops = {
 	.p_init   = tlstran_pipe_init,
 	.p_fini   = tlstran_pipe_fini,
 	.p_stop   = tlstran_pipe_stop,
@@ -1231,7 +1230,7 @@ tlstran_listener_set(
 	return (rv);
 }
 
-static nni_tran_dialer_ops tlstran_dialer_ops = {
+static nni_sp_dialer_ops tlstran_dialer_ops = {
 	.d_init    = tlstran_ep_init_dialer,
 	.d_fini    = tlstran_ep_fini,
 	.d_connect = tlstran_ep_connect,
@@ -1240,7 +1239,7 @@ static nni_tran_dialer_ops tlstran_dialer_ops = {
 	.d_setopt  = tlstran_dialer_setopt,
 };
 
-static nni_tran_listener_ops tlstran_listener_ops = {
+static nni_sp_listener_ops tlstran_listener_ops = {
 	.l_init   = tlstran_ep_init_listener,
 	.l_fini   = tlstran_ep_fini,
 	.l_bind   = tlstran_ep_bind,
@@ -1250,8 +1249,7 @@ static nni_tran_listener_ops tlstran_listener_ops = {
 	.l_setopt = tlstran_listener_set,
 };
 
-static nni_tran tls_tran = {
-	.tran_version  = NNI_TRANSPORT_VERSION,
+static nni_sp_tran tls_tran = {
 	.tran_scheme   = "tls+tcp",
 	.tran_dialer   = &tlstran_dialer_ops,
 	.tran_listener = &tlstran_listener_ops,
@@ -1260,8 +1258,7 @@ static nni_tran tls_tran = {
 	.tran_fini     = tlstran_fini,
 };
 
-static nni_tran tls4_tran = {
-	.tran_version  = NNI_TRANSPORT_VERSION,
+static nni_sp_tran tls4_tran = {
 	.tran_scheme   = "tls+tcp4",
 	.tran_dialer   = &tlstran_dialer_ops,
 	.tran_listener = &tlstran_listener_ops,
@@ -1270,8 +1267,7 @@ static nni_tran tls4_tran = {
 	.tran_fini     = tlstran_fini,
 };
 
-static nni_tran tls6_tran = {
-	.tran_version  = NNI_TRANSPORT_VERSION,
+static nni_sp_tran tls6_tran = {
 	.tran_scheme   = "tls+tcp6",
 	.tran_dialer   = &tlstran_dialer_ops,
 	.tran_listener = &tlstran_listener_ops,
@@ -1283,11 +1279,8 @@ static nni_tran tls6_tran = {
 int
 nng_tls_register(void)
 {
-	int rv;
-	if (((rv = nni_tran_register(&tls_tran)) != 0) ||
-	    ((rv = nni_tran_register(&tls4_tran)) != 0) ||
-	    ((rv = nni_tran_register(&tls6_tran)) != 0)) {
-		return (rv);
-	}
+	nni_sp_tran_register(&tls_tran);
+	nni_sp_tran_register(&tls4_tran);
+	nni_sp_tran_register(&tls6_tran);
 	return (0);
 }

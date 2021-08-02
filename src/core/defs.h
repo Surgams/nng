@@ -1,5 +1,5 @@
 //
-// Copyright 2020 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitoar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -36,8 +36,6 @@ typedef nng_sockaddr      nni_sockaddr;
 typedef nng_url           nni_url;
 typedef nng_iov           nni_iov;
 typedef nng_aio           nni_aio;
-typedef struct nng_event  nni_event;
-typedef struct nng_notify nni_notify;
 
 // These are our own names.
 typedef struct nni_socket   nni_sock;
@@ -46,10 +44,10 @@ typedef struct nni_dialer   nni_dialer;
 typedef struct nni_listener nni_listener;
 typedef struct nni_pipe     nni_pipe;
 
-typedef struct nni_tran              nni_tran;
-typedef struct nni_tran_dialer_ops   nni_tran_dialer_ops;
-typedef struct nni_tran_listener_ops nni_tran_listener_ops;
-typedef struct nni_tran_pipe_ops     nni_tran_pipe_ops;
+typedef struct nni_sp_tran           nni_sp_tran;
+typedef struct nni_sp_dialer_ops     nni_sp_dialer_ops;
+typedef struct nni_sp_listener_ops   nni_sp_listener_ops;
+typedef struct nni_sp_pipe_ops       nni_sp_pipe_ops;
 
 typedef struct nni_proto_ctx_ops  nni_proto_ctx_ops;
 typedef struct nni_proto_sock_ops nni_proto_sock_ops;
@@ -61,18 +59,10 @@ typedef struct nni_plat_cv  nni_cv;
 typedef struct nni_thr      nni_thr;
 typedef void (*nni_thr_func)(void *);
 
-typedef int      nni_signal;   // Wakeup channel.
 typedef uint64_t nni_time;     // Abs. time (ms).
 typedef int32_t  nni_duration; // Rel. time (ms).
 
 typedef void (*nni_cb)(void *);
-
-// Notify descriptor.
-typedef struct {
-	int sn_wfd; // written to in order to flag an event
-	int sn_rfd; // read from in order to clear an event
-	int sn_init;
-} nni_notifyfd;
 
 // Some default timing things.
 #define NNI_TIME_NEVER ((nni_time) -1)
@@ -174,5 +164,10 @@ typedef nni_type nni_opt_type;
 
 // NNI_MAX_HEADER_SIZE is our header size.
 #define NNI_MAX_HEADER_SIZE ((NNI_MAX_MAX_TTL + 1) * sizeof(uint32_t))
+
+// NNI_EXPIRE_Q_SIZE is the default size of aio expire queue
+#ifndef NNI_EXPIRE_Q_SIZE
+#define NNI_EXPIRE_Q_SIZE 256
+#endif
 
 #endif // CORE_DEFS_H

@@ -1,5 +1,5 @@
 //
-// Copyright 2020 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -49,8 +49,8 @@ extern "C" {
 // We use SemVer, and these versions are about the API, and
 // may not necessarily match the ABI versions.
 #define NNG_MAJOR_VERSION 1
-#define NNG_MINOR_VERSION 4
-#define NNG_PATCH_VERSION 0
+#define NNG_MINOR_VERSION 5
+#define NNG_PATCH_VERSION 1
 #define NNG_RELEASE_SUFFIX "" // if non-empty, this is a pre-release
 
 // Maximum length of a socket address. This includes the terminating NUL.
@@ -594,6 +594,8 @@ NNG_DECL void nng_sleep_aio(nng_duration, nng_aio *);
 NNG_DECL int      nng_msg_alloc(nng_msg **, size_t);
 NNG_DECL void     nng_msg_free(nng_msg *);
 NNG_DECL int      nng_msg_realloc(nng_msg *, size_t);
+NNG_DECL int      nng_msg_reserve(nng_msg *, size_t);
+NNG_DECL size_t   nng_msg_capacity(nng_msg *);
 NNG_DECL void *   nng_msg_header(nng_msg *);
 NNG_DECL size_t   nng_msg_header_len(const nng_msg *);
 NNG_DECL void *   nng_msg_body(nng_msg *);

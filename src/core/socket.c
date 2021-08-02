@@ -1,5 +1,5 @@
 //
-// Copyright 2020 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -124,15 +124,10 @@ sock_get_fd(void *s, unsigned flag, int *fdp)
 		return (NNG_ENOTSUP);
 	}
 
-	switch (flag) {
-	case NNI_PROTO_FLAG_SND:
+	if (flag == NNI_PROTO_FLAG_SND) {
 		rv = nni_msgq_get_sendable(SOCK(s)->s_uwq, &p);
-		break;
-	case NNI_PROTO_FLAG_RCV:
+	} else {
 		rv = nni_msgq_get_recvable(SOCK(s)->s_urq, &p);
-		break;
-	default:
-		return (NNG_EINVAL);
 	}
 
 	if (rv == 0) {
@@ -499,7 +494,7 @@ sock_stats_init(nni_sock *s)
 	sock_stat_init(s, &s->st_tx_bytes, &tx_bytes_info);
 	sock_stat_init(s, &s->st_rx_bytes, &rx_bytes_info);
 
-	nni_stat_set_id(&s->st_id, s->s_id);
+	nni_stat_set_id(&s->st_id, (int) s->s_id);
 	nni_stat_set_string(&s->st_name, s->s_name);
 	nni_stat_set_string(&s->st_protocol, nni_sock_proto_name(s));
 }
@@ -519,13 +514,11 @@ sock_destroy(nni_sock *s)
 		s->s_sock_ops.sock_fini(s->s_data);
 	}
 
+	nni_mtx_lock(&s->s_mx);
 	while ((sopt = nni_list_first(&s->s_options)) != NULL) {
 		nni_list_remove(&s->s_options, sopt);
 		nni_free_opt(sopt);
 	}
-
-	// This exists to silence a false positive in helgrind.
-	nni_mtx_lock(&s->s_mx);
 	nni_mtx_unlock(&s->s_mx);
 
 	nni_msgq_fini(s->s_urq);
@@ -670,7 +663,7 @@ nni_sock_open(nni_sock **sockp, const nni_proto *proto)
 
 #ifdef NNG_ENABLE_STATS
 	// Set up basic stat values.
-	nni_stat_set_id(&s->st_id, s->s_id);
+	nni_stat_set_id(&s->st_id, (int) s->s_id);
 
 	// Add our stats chain.
 	nni_stat_register(&s->st_root);
@@ -1480,7 +1473,8 @@ dialer_timer_start_locked(nni_dialer *d)
 	// This algorithm may lead to slight biases because we don't
 	// have a statistically perfect distribution with the modulo of
 	// the random number, but this really doesn't matter.
-	nni_sleep_aio(back_off ? nni_random() % back_off : 0, &d->d_tmo_aio);
+	nni_sleep_aio(
+	    back_off ? (int) nni_random() % back_off : 0, &d->d_tmo_aio);
 }
 
 void
@@ -1500,8 +1494,12 @@ nni_dialer_add_pipe(nni_dialer *d, void *tpipe)
 
 	nni_mtx_lock(&s->s_mx);
 
-	if (s->s_closed || d->d_closing ||
-	    (nni_pipe_create_dialer(&p, d, tpipe) != 0)) {
+	if (s->s_closed || d->d_closing) {
+		d->d_tran->tran_pipe->p_fini(tpipe);
+		nni_mtx_unlock(&s->s_mx);
+		return;
+	}
+	if (nni_pipe_create_dialer(&p, d, tpipe) != 0) {
 		nni_mtx_unlock(&s->s_mx);
 		return;
 	}
@@ -1637,8 +1635,13 @@ nni_listener_add_pipe(nni_listener *l, void *tpipe)
 	nni_pipe *p;
 
 	nni_mtx_lock(&s->s_mx);
-	if (s->s_closed || l->l_closing ||
-	    (nni_pipe_create_listener(&p, l, tpipe) != 0)) {
+	if (s->s_closed || l->l_closing) {
+		l->l_tran->tran_pipe->p_fini(tpipe);
+		nni_mtx_unlock(&s->s_mx);
+		return;
+	}
+
+	if (nni_pipe_create_listener(&p, l, tpipe) != 0) {
 		nni_mtx_unlock(&s->s_mx);
 		return;
 	}

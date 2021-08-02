@@ -1,5 +1,5 @@
 //
-// Copyright 2020 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 // Copyright 2018 Devolutions <info@devolutions.net>
 //
@@ -9,28 +9,10 @@
 // found online at https://opensource.org/licenses/MIT.
 //
 
-#ifndef CORE_TRANSPORT_H
-#define CORE_TRANSPORT_H
+#ifndef PROTOCOL_SP_TRANSPORT_H
+#define PROTOCOL_SP_TRANSPORT_H
 
 #include "core/options.h"
-
-// We quite intentionally use a signature where the upper word is nonzero,
-// which ensures that if we get garbage we will reject it.  This is more
-// likely to mismatch than all zero bytes would.  The actual version is
-// stored in the lower word; this is not semver -- the numbers are just
-// increasing - we doubt it will increase more than a handful of times
-// during the life of the project.  If we add a new version, please keep
-// the old version around -- it may be possible to automatically convert
-// older versions in the future.
-#define NNI_TRANSPORT_V0 0x54520000
-#define NNI_TRANSPORT_V1 0x54520001
-#define NNI_TRANSPORT_V2 0x54520002
-#define NNI_TRANSPORT_V3 0x54520003
-#define NNI_TRANSPORT_V4 0x54520004
-#define NNI_TRANSPORT_V5 0x54520005
-#define NNI_TRANSPORT_V6 0x54220006
-#define NNI_TRANSPORT_V7 0x54220006
-#define NNI_TRANSPORT_VERSION NNI_TRANSPORT_V7
 
 // Endpoint operations are called by the socket in a
 // protocol-independent fashion.  The socket makes individual calls,
@@ -42,7 +24,7 @@
 // point is run exclusively of the others. (Transports must still guard
 // against any asynchronous operations they manage themselves, though.)
 
-struct nni_tran_dialer_ops {
+struct nni_sp_dialer_ops {
 	// d_init creates a vanilla dialer. The value created is
 	// used for the first argument for all other dialer functions.
 	int (*d_init)(void **, nni_url *, nni_dialer *);
@@ -73,7 +55,7 @@ struct nni_tran_dialer_ops {
 	nni_option *d_options;
 };
 
-struct nni_tran_listener_ops {
+struct nni_sp_listener_ops {
 	// l_init creates a vanilla listener. The value created is
 	// used for the first argument for all other listener functions.
 	int (*l_init)(void **, nni_url *, nni_listener *);
@@ -114,7 +96,7 @@ struct nni_tran_listener_ops {
 // to call back into the socket at this point.  (Which is one reason
 // pointers back to socket or even enclosing pipe state, are not
 // provided.)
-struct nni_tran_pipe_ops {
+struct nni_sp_pipe_ops {
 	// p_init initializes the pipe data structures.  The main
 	// purpose of this is so that the pipe will see the upper
 	// layer nni_pipe and get a chance to register stats and such.
@@ -159,38 +141,36 @@ struct nni_tran_pipe_ops {
 
 // Transport implementation details.  Transports must implement the
 // interfaces in this file.
-struct nni_tran {
-	// tran_version is the version of the transport ops that this
-	// transport implements.  We only bother to version the main
-	// ops vector.
-	uint32_t tran_version;
+struct nni_sp_tran {
+	// tran_link is for framework use only - it must initialized
+	// to zero before registration.
+	nni_list_node tran_link;
 
 	// tran_scheme is the transport scheme, such as "tcp" or "inproc".
 	const char *tran_scheme;
 
 	// tran_dialer links our dialer-specific operations.
-	const nni_tran_dialer_ops *tran_dialer;
+	const nni_sp_dialer_ops *tran_dialer;
 
 	// tran_listener links our listener-specific operations.
-	const nni_tran_listener_ops *tran_listener;
+	const nni_sp_listener_ops *tran_listener;
 
 	// tran_pipe links our pipe-specific operations.
-	const nni_tran_pipe_ops *tran_pipe;
+	const nni_sp_pipe_ops *tran_pipe;
 
-	// tran_init, if not NULL, is called once during library
-	// initialization.
-	int (*tran_init)(void);
+	// tran_init is called once during library initialization.
+	void (*tran_init)(void);
 
-	// tran_fini, if not NULL, is called during library deinitialization.
-	// It should release any global resources, close any open files, etc.
+	// tran_fini is called during library shutdown.
+	// It should release any global resources.
 	void (*tran_fini)(void);
 };
 
 // These APIs are used by the framework internally, and not for use by
 // transport implementations.
-extern nni_tran *nni_tran_find(nni_url *);
-extern int       nni_tran_sys_init(void);
-extern void      nni_tran_sys_fini(void);
-extern int       nni_tran_register(const nni_tran *);
+extern nni_sp_tran *nni_sp_tran_find(nni_url *);
+extern int          nni_sp_tran_sys_init(void);
+extern void         nni_sp_tran_sys_fini(void);
+extern void         nni_sp_tran_register(nni_sp_tran *);
 
-#endif // CORE_TRANSPORT_H
+#endif // PROTOCOL_SP_TRANSPORT_H

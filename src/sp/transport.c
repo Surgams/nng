@@ -11,30 +11,12 @@
 
 #include "core/nng_impl.h"
 
-#ifdef NNG_TRANSPORT_INPROC
-#include "nng/transport/inproc/inproc.h"
-#endif
-#ifdef NNG_TRANSPORT_IPC
-#include "nng/transport/ipc/ipc.h"
-#endif
-#ifdef NNG_TRANSPORT_TCP
-#include "nng/transport/tcp/tcp.h"
-#endif
-#ifdef NNG_TRANSPORT_TLS
-#include "nng/transport/tls/tls.h"
-#endif
-#ifdef NNG_TRANSPORT_WS
-#include "nng/transport/ws/websocket.h"
-#endif
-#ifdef NNG_TRANSPORT_ZEROTIER
-#include "nng/transport/zerotier/zerotier.h"
-#endif
-
 #include <stdio.h>
 #include <string.h>
 
-static nni_list   sp_tran_list;
-static nni_rwlock sp_tran_lk;
+static nni_list sp_tran_list =
+    NNI_LIST_INITIALIZER(sp_tran_list, nni_sp_tran, tran_link);
+static nni_rwlock sp_tran_lk = NNI_RWLOCK_INITIALIZER;
 
 void
 nni_sp_tran_register(nni_sp_tran *tran)
@@ -67,34 +49,52 @@ nni_sp_tran_find(nni_url *url)
 // nni_sp_tran_sys_init initializes the entire transport subsystem, including
 // each individual transport.
 
-int
-nni_sp_tran_sys_init(void)
-{
-	NNI_LIST_INIT(&sp_tran_list, nni_sp_tran, tran_link);
-	nni_rwlock_init(&sp_tran_lk);
-
 #ifdef NNG_TRANSPORT_INPROC
-	nng_inproc_register();
+extern void nni_sp_inproc_register(void);
 #endif
 #ifdef NNG_TRANSPORT_IPC
-	nng_ipc_register();
+extern void nni_sp_ipc_register(void);
 #endif
 #ifdef NNG_TRANSPORT_TCP
-	nng_tcp_register();
+extern void nni_sp_tcp_register(void);
 #endif
 #ifdef NNG_TRANSPORT_TLS
-	nng_tls_register();
+extern void nni_sp_tls_register(void);
 #endif
 #ifdef NNG_TRANSPORT_WS
-	nng_ws_register();
+extern void nni_sp_ws_register(void);
 #endif
 #ifdef NNG_TRANSPORT_WSS
-	nng_wss_register();
+extern void nni_sp_wss_register(void);
 #endif
 #ifdef NNG_TRANSPORT_ZEROTIER
-	nng_zt_register();
+extern void nni_sp_zt_register(void);
 #endif
-	return (0);
+
+void
+nni_sp_tran_sys_init(void)
+{
+#ifdef NNG_TRANSPORT_INPROC
+	nni_sp_inproc_register();
+#endif
+#ifdef NNG_TRANSPORT_IPC
+	nni_sp_ipc_register();
+#endif
+#ifdef NNG_TRANSPORT_TCP
+	nni_sp_tcp_register();
+#endif
+#ifdef NNG_TRANSPORT_TLS
+	nni_sp_tls_register();
+#endif
+#ifdef NNG_TRANSPORT_WS
+	nni_sp_ws_register();
+#endif
+#ifdef NNG_TRANSPORT_WSS
+	nni_sp_wss_register();
+#endif
+#ifdef NNG_TRANSPORT_ZEROTIER
+	nni_sp_zt_register();
+#endif
 }
 
 // nni_sp_tran_sys_fini finalizes the entire transport system, including all
@@ -108,5 +108,4 @@ nni_sp_tran_sys_fini(void)
 		nni_list_remove(&sp_tran_list, t);
 		t->tran_fini();
 	}
-	nni_rwlock_fini(&sp_tran_lk);
 }

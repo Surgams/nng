@@ -26,8 +26,10 @@ static pfnSetThreadDescription set_thread_desc;
 	__atomic_add_fetch(a, b, __ATOMIC_RELAXED)
 #define InterlockedIncrementAcquire64(a) \
 	__atomic_add_fetch(a, 1, __ATOMIC_ACQUIRE)
+#define InterlockedDecrementAcquire64(a) \
+	__atomic_sub_fetch(a, 1, __ATOMIC_ACQUIRE)
 #define InterlockedDecrementRelease64(a) \
-	__atomic_fetch_sub(a, 1, __ATOMIC_RELEASE)
+	__atomic_sub_fetch(a, 1, __ATOMIC_RELEASE)
 #endif
 
 #include <stdlib.h>
@@ -55,13 +57,11 @@ void
 nni_plat_mtx_init(nni_plat_mtx *mtx)
 {
 	InitializeSRWLock(&mtx->srl);
-	mtx->init = 1;
 }
 
 void
 nni_plat_mtx_fini(nni_plat_mtx *mtx)
 {
-	mtx->init = 0;
 }
 
 void
@@ -182,7 +182,7 @@ nni_atomic_set_bool(nni_atomic_bool *v, bool b)
 bool
 nni_atomic_get_bool(nni_atomic_bool *v)
 {
-	return ((bool) InterlockedAdd(&v->v, 0));
+	return ((bool) InterlockedExchangeAdd(&v->v, 0));
 }
 
 bool
@@ -223,6 +223,18 @@ nni_atomic_set64(nni_atomic_u64 *v, uint64_t u)
 	(void) InterlockedExchange64(&v->v, (LONGLONG) u);
 }
 
+void *
+nni_atomic_get_ptr(nni_atomic_ptr *v)
+{
+	return ((void *) (InterlockedExchangeAdd64(&v->v, 0)));
+}
+
+void
+nni_atomic_set_ptr(nni_atomic_ptr *v, void *p)
+{
+	(void) InterlockedExchange64(&v->v, (LONGLONG) (uintptr_t) p);
+}
+
 uint64_t
 nni_atomic_swap64(nni_atomic_u64 *v, uint64_t u)
 {
@@ -252,6 +264,16 @@ nni_atomic_dec64_nv(nni_atomic_u64 *v)
 	return ((uint64_t) (InterlockedDecrementRelease64(&v->v)));
 #else
 	return ((uint64_t) (InterlockedDecrement64(&v->v)));
+#endif
+}
+
+void
+nni_atomic_dec64(nni_atomic_u64 *v)
+{
+#ifdef _WIN64
+	InterlockedDecrementAcquire64(&v->v);
+#else
+	InterlockedDecrement64(&v->v);
 #endif
 }
 
@@ -311,6 +333,12 @@ int
 nni_atomic_dec_nv(nni_atomic_int *v)
 {
 	return (InterlockedDecrementRelease(&v->v));
+}
+
+void
+nni_atomic_dec(nni_atomic_int *v)
+{
+	(void) InterlockedDecrementAcquire(&v->v);
 }
 
 bool
@@ -381,7 +409,8 @@ nni_plat_thr_set_name(nni_plat_thr *thr, const char *name)
 		if ((wcs = nni_alloc(len * 2)) == NULL) {
 			return;
 		}
-		(void) MultiByteToWideChar(CP_UTF8, 0, name, len, wcs, len);
+		(void) MultiByteToWideChar(
+		    CP_UTF8, 0, name, (int) len, wcs, (int) len);
 		set_thread_desc(h, wcs);
 		nni_free(wcs, len * 2);
 	}

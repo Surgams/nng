@@ -1,5 +1,5 @@
 //
-// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2022 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -12,14 +12,12 @@
 #include <string.h>
 
 struct nni_aio_expire_q {
-	nni_mtx   eq_mtx;
-	nni_cv    eq_cv;
-	nni_aio **eq_list;
-	uint32_t  eq_len;
-	uint32_t  eq_cap;
-	nni_aio * eq_aio; // currently expiring (task dispatch)
-	nni_thr   eq_thr;
-	bool      eq_exit;
+	nni_mtx  eq_mtx;
+	nni_cv   eq_cv;
+	nni_list eq_list;
+	nni_thr  eq_thr;
+	nni_time eq_next; // next expiration
+	bool     eq_exit;
 };
 
 static nni_aio_expire_q **nni_aio_expire_q_list;
@@ -39,8 +37,8 @@ static int                nni_aio_expire_q_cnt;
 // free to examine the aio for list membership, etc.  The provider must
 // not call finish more than once though.
 //
-// We use an array of expiration queues, each with it's own lock and
-// condition variable, and expiration thread.  By default this is one
+// We use an array of expiration queues, each with its own lock and
+// condition variable, and expiration thread.  By default, this is one
 // per CPU core present -- the goal being to reduce overall pressure
 // caused by a single lock.  The number of queues (and threads) can
 // be tuned using the NNG_EXPIRE_THREADS tunable.
@@ -90,8 +88,8 @@ static int                nni_aio_expire_q_cnt;
 #define aio_safe_lock(l) nni_mtx_lock(l)
 #define aio_safe_unlock(l) nni_mtx_unlock(l)
 #else
-#define aio_safe_lock(l)
-#define aio_safe_unlock(l)
+#define aio_safe_lock(l) ((void) 1)
+#define aio_safe_unlock(l) ((void) 1)
 #endif
 
 static nni_reap_list aio_reap_list = {
@@ -117,7 +115,7 @@ void
 nni_aio_fini(nni_aio *aio)
 {
 	nni_aio_cancel_fn fn;
-	void *            arg;
+	void	     *arg;
 	nni_aio_expire_q *eq = aio->a_expire_q;
 
 	// This is like aio_close, but we don't want to dispatch
@@ -126,10 +124,10 @@ nni_aio_fini(nni_aio *aio)
 	// We also wait if the aio is being expired.
 	nni_mtx_lock(&eq->eq_mtx);
 	aio->a_stop = true;
-	nni_aio_expire_rm(aio);
-	while (eq->eq_aio == aio) {
+	while (aio->a_expiring) {
 		nni_cv_wait(&eq->eq_cv);
 	}
+	nni_aio_expire_rm(aio);
 	fn                = aio->a_cancel_fn;
 	arg               = aio->a_cancel_arg;
 	aio->a_cancel_fn  = NULL;
@@ -203,7 +201,7 @@ nni_aio_stop(nni_aio *aio)
 {
 	if (aio != NULL) {
 		nni_aio_cancel_fn fn;
-		void *            arg;
+		void             *arg;
 		nni_aio_expire_q *eq = aio->a_expire_q;
 
 		nni_mtx_lock(&eq->eq_mtx);
@@ -228,7 +226,7 @@ nni_aio_close(nni_aio *aio)
 {
 	if (aio != NULL) {
 		nni_aio_cancel_fn fn;
-		void *            arg;
+		void             *arg;
 		nni_aio_expire_q *eq = aio->a_expire_q;
 
 		nni_mtx_lock(&eq->eq_mtx);
@@ -316,6 +314,12 @@ nni_aio_wait(nni_aio *aio)
 	nni_task_wait(&aio->a_task);
 }
 
+bool
+nni_aio_busy(nni_aio *aio)
+{
+	return (nni_task_busy(&aio->a_task));
+}
+
 int
 nni_aio_begin(nni_aio *aio)
 {
@@ -332,7 +336,7 @@ nni_aio_begin(nni_aio *aio)
 	NNI_ASSERT(aio->a_cancel_fn == NULL);
 	NNI_ASSERT(!nni_list_node_active(&aio->a_expire_node));
 
-	// Some initialization can be done outside of the lock, because
+	// Some initialization can be done outside the lock, because
 	// we must have exclusive access to the aio.
 	for (unsigned i = 0; i < NNI_NUM_ELEMENTS(aio->a_outputs); i++) {
 		aio->a_outputs[i] = NULL;
@@ -407,7 +411,7 @@ void
 nni_aio_abort(nni_aio *aio, int rv)
 {
 	nni_aio_cancel_fn fn;
-	void *            arg;
+	void	     *arg;
 	nni_aio_expire_q *eq = aio->a_expire_q;
 
 	nni_mtx_lock(&eq->eq_mtx);
@@ -508,19 +512,11 @@ static void
 nni_aio_expire_add(nni_aio *aio)
 {
 	nni_aio_expire_q *eq = aio->a_expire_q;
-	if (eq->eq_len >= eq->eq_cap) {
-		nni_aio **new_list =
-		    nni_zalloc(eq->eq_cap * 2 * sizeof(nni_aio *));
-		for (uint32_t i = 0; i < eq->eq_len; i++) {
-			new_list[i] = eq->eq_list[i];
-		}
-		nni_free(eq->eq_list, eq->eq_cap * sizeof(nni_aio *));
-		eq->eq_list = new_list;
-		eq->eq_cap *= 2;
-	}
 
-	eq->eq_list[eq->eq_len++] = aio;
-	if (eq->eq_len == 1) {
+	nni_list_append(&eq->eq_list, aio);
+
+	if (eq->eq_next > aio->a_expire) {
+		eq->eq_next = aio->a_expire;
 		nni_cv_wake(&eq->eq_cv);
 	}
 }
@@ -528,119 +524,115 @@ nni_aio_expire_add(nni_aio *aio)
 static void
 nni_aio_expire_rm(nni_aio *aio)
 {
-	nni_aio_expire_q *eq = aio->a_expire_q;
+	nni_list_node_remove(&aio->a_expire_node);
 
-	for (uint32_t i = 0; i < eq->eq_len; i++) {
-		if (aio == eq->eq_list[i]) {
-			eq->eq_list[i] = eq->eq_list[eq->eq_len - 1];
-			eq->eq_len--;
-			break;
-		}
-	}
-
-	if (eq->eq_len < eq->eq_cap / 4 && eq->eq_cap > NNI_EXPIRE_Q_SIZE) {
-		nni_aio **new_list =
-		    nni_zalloc(eq->eq_cap * sizeof(nni_aio *) / 4);
-		for (uint32_t i = 0; i < eq->eq_len; i++) {
-			new_list[i] = eq->eq_list[i];
-		}
-		nni_free(eq->eq_list, eq->eq_cap * sizeof(nni_aio *));
-		eq->eq_list = new_list;
-		eq->eq_cap /= 4;
-	}
+	// If this item is the one that is going to wake the loop,
+	// don't worry about it.  It will wake up normally, or when we
+	// add a new aio to it. Worst case is just one spurious wake up,
+	// which we'd need to do anyway.
 }
 
 static void
 nni_aio_expire_loop(void *arg)
 {
 	nni_aio_expire_q *q   = arg;
-	nni_mtx *         mtx = &q->eq_mtx;
-	nni_cv *          cv  = &q->eq_cv;
-	nni_aio **        list;
+	nni_mtx          *mtx = &q->eq_mtx;
+	nni_cv           *cv  = &q->eq_cv;
 	nni_time          now;
-	uint32_t          aio_idx;
+	uint32_t          exp_idx;
+	nni_aio          *expires[NNI_EXPIRE_BATCH];
 
 	nni_thr_set_name(NULL, "nng:aio:expire");
 
-	now = nni_clock();
 	nni_mtx_lock(mtx);
 
 	for (;;) {
 		nni_aio *aio;
 		int      rv;
+		nni_time next;
 
-		if (q->eq_len == 0) {
+		next = q->eq_next;
+		now  = nni_clock();
 
-			if (q->eq_exit) {
+		// Each time we wake up, we scan the entire list of elements.
+		// We scan forward, moving up to NNI_EXPIRE_Q_SIZE elements
+		// (a batch) to a saved array of things we are going to cancel.
+		// This mostly runs in O(n), provided you don't have many
+		// elements (> NNI_EXPIRE_Q_SIZE) all expiring simultaneously.
+		aio = nni_list_first(&q->eq_list);
+		if ((aio == NULL) && (q->eq_exit)) {
+			nni_mtx_unlock(mtx);
+			return;
+		}
+		if (now < next) {
+			// Early wake up (just to reschedule), no need to
+			// rescan the list.  This is an optimization.
+			nni_cv_until(cv, next);
+			continue;
+		}
+		q->eq_next = NNI_TIME_NEVER;
+		exp_idx    = 0;
+		while (aio != NULL) {
+			if ((aio->a_expire < now) &&
+			    (exp_idx < NNI_EXPIRE_BATCH)) {
+				nni_aio *nxt;
+
+				// This one is expiring.
+				expires[exp_idx++] = aio;
+				// save the next node
+				nxt = nni_list_next(&q->eq_list, aio);
+				nni_list_remove(&q->eq_list, aio);
+				// Place a temporary hold on the aio.
+				// This prevents it from being destroyed.
+				aio->a_expiring = true;
+				aio             = nxt;
+				continue;
+			}
+			if (aio->a_expire < q->eq_next) {
+				q->eq_next = aio->a_expire;
+			}
+			aio = nni_list_next(&q->eq_list, aio);
+		}
+
+		for (uint32_t i = 0; i < exp_idx; i++) {
+			aio = expires[i];
+			rv  = aio->a_expire_ok ? 0 : NNG_ETIMEDOUT;
+
+			nni_aio_cancel_fn cancel_fn  = aio->a_cancel_fn;
+			void             *cancel_arg = aio->a_cancel_arg;
+
+			aio->a_cancel_fn  = NULL;
+			aio->a_cancel_arg = NULL;
+
+			// We let the cancel function handle the completion.
+			// If there is no cancellation function, then we cannot
+			// terminate the aio - we've tried, but it has to run
+			// to its natural conclusion.
+			if (cancel_fn != NULL) {
 				nni_mtx_unlock(mtx);
-				return;
+				cancel_fn(aio, cancel_arg, rv);
+				nni_mtx_lock(mtx);
 			}
-
-			nni_cv_wait(cv);
-
-			now = nni_clock();
-			continue;
+			aio->a_expiring = false;
 		}
-
-		// Find the timer with min expire time.
-		list    = q->eq_list;
-		aio_idx = 0;
-		aio     = list[aio_idx];
-		for (uint32_t i = 0; i < q->eq_len; i++) {
-			if (list[i]->a_expire < aio->a_expire) {
-				aio     = list[i];
-				aio_idx = i;
-			}
-		}
-		if (now < aio->a_expire) {
-			// Unexpired; we just wait for the next expired aio.
-			nni_cv_until(cv, aio->a_expire);
-			now = nni_clock();
-			continue;
-		}
-
-		// The time has come for this aio.  Expire it, canceling any
-		// outstanding I/O.
-		list[aio_idx] = list[q->eq_len - 1];
-		q->eq_len--;
-		rv = aio->a_expire_ok ? 0 : NNG_ETIMEDOUT;
-
-		nni_aio_cancel_fn cancel_fn  = aio->a_cancel_fn;
-		void *            cancel_arg = aio->a_cancel_arg;
-
-		aio->a_cancel_fn  = NULL;
-		aio->a_cancel_arg = NULL;
-		// Place a temporary hold on the aio.  This prevents it
-		// from being destroyed.
-		q->eq_aio = aio;
-
-		// We let the cancel function handle the completion.
-		// If there is no cancellation function, then we cannot
-		// terminate the aio - we've tried, but it has to run
-		// to it's natural conclusion.
-		nni_mtx_unlock(mtx);
-		cancel_fn(aio, cancel_arg, rv);
-
-		// Get updated time before reacquiring lock.
-		now = nni_clock();
-
-		nni_mtx_lock(mtx);
-
-		q->eq_aio = NULL;
 		nni_cv_wake(cv);
+
+		if (now < q->eq_next) {
+			nni_cv_until(cv, q->eq_next);
+		}
 	}
 }
 
 void *
-nni_aio_get_prov_extra(nni_aio *aio, unsigned index)
+nni_aio_get_prov_data(nni_aio *aio)
 {
-	return (aio->a_prov_extra[index]);
+	return (aio->a_prov_data);
 }
 
 void
-nni_aio_set_prov_extra(nni_aio *aio, unsigned index, void *data)
+nni_aio_set_prov_data(nni_aio *aio, void *data)
 {
-	aio->a_prov_extra[index] = data;
+	aio->a_prov_data = data;
 }
 
 void
@@ -757,7 +749,6 @@ nni_aio_expire_q_free(nni_aio_expire_q *eq)
 		nni_mtx_unlock(&eq->eq_mtx);
 	}
 
-	nni_free(eq->eq_list, eq->eq_cap * sizeof(nni_aio *));
 	nni_thr_fini(&eq->eq_thr);
 	nni_cv_fini(&eq->eq_cv);
 	nni_mtx_fini(&eq->eq_mtx);
@@ -774,9 +765,8 @@ nni_aio_expire_q_alloc(void)
 	}
 	nni_mtx_init(&eq->eq_mtx);
 	nni_cv_init(&eq->eq_cv, &eq->eq_mtx);
-	eq->eq_cap  = NNI_EXPIRE_Q_SIZE;
-	eq->eq_len  = 0;
-	eq->eq_list = nni_zalloc(eq->eq_cap * sizeof(nni_aio *));
+	NNI_LIST_INIT(&eq->eq_list, nni_aio, a_expire_node);
+	eq->eq_next = NNI_TIME_NEVER;
 	eq->eq_exit = false;
 
 	if (nni_thr_init(&eq->eq_thr, nni_aio_expire_loop, eq) != 0) {

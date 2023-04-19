@@ -9,7 +9,6 @@
 // found online at https://opensource.org/licenses/MIT.
 //
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -259,8 +258,8 @@ tcptran_pipe_nego_cb(void *arg)
 		nni_mtx_unlock(&ep->mtx);
 		return;
 	}
-	// We have both sent and received the headers.  Lets check the
-	// receive side header.
+	// We have both sent and received the headers.  Let's check the
+	// receiver.
 	if ((p->rxlen[0] != 0) || (p->rxlen[1] != 'S') ||
 	    (p->rxlen[2] != 'P') || (p->rxlen[3] != 0) || (p->rxlen[6] != 0) ||
 	    (p->rxlen[7] != 0)) {
@@ -270,7 +269,7 @@ tcptran_pipe_nego_cb(void *arg)
 
 	NNI_GET16(&p->rxlen[4], p->peer);
 
-	// We are all ready now.  We put this in the wait list, and
+	// We are ready now.  We put this in the wait list, and
 	// then try to run the matcher.
 	nni_list_remove(&ep->negopipes, p);
 	nni_list_append(&ep->waitpipes, p);
@@ -281,6 +280,13 @@ tcptran_pipe_nego_cb(void *arg)
 	return;
 
 error:
+	// If the connection is closed, we need to pass back a different
+	// error code.  This is necessary to avoid a problem where the
+	// closed status is confused with the accept file descriptor
+	// being closed.
+	if (rv == NNG_ECLOSED) {
+		rv = NNG_ECONNSHUT;
+	}
 	nng_stream_close(p->conn);
 
 	if ((uaio = ep->useraio) != NULL) {
@@ -352,6 +358,11 @@ tcptran_pipe_recv_cb(void *arg)
 	aio = nni_list_first(&p->recvq);
 
 	if ((rv = nni_aio_result(rxaio)) != 0) {
+		goto recv_error;
+	}
+
+	if (p->closed) {
+		rv = NNG_ECLOSED;
 		goto recv_error;
 	}
 
@@ -1247,11 +1258,18 @@ static nni_sp_tran tcp6_tran = {
 	.tran_fini     = tcptran_fini,
 };
 
+#ifndef NNG_ELIDE_DEPRECATED
 int
 nng_tcp_register(void)
+{
+	return (nni_init());
+}
+#endif
+
+void
+nni_sp_tcp_register(void)
 {
 	nni_sp_tran_register(&tcp_tran);
 	nni_sp_tran_register(&tcp4_tran);
 	nni_sp_tran_register(&tcp6_tran);
-	return (0);
 }

@@ -13,7 +13,7 @@
 # the static library unless they also go into the dynamic.
 if (NNG_PLATFORM_POSIX)
 
-    find_package(Threads REQUIRED)
+    nng_find_package(Threads)
     nng_link_libraries(Threads::Threads)
 
     # Unconditionally declare the following feature test macros.  These are
@@ -105,4 +105,7 @@ if (NNG_PLATFORM_POSIX)
     else ()
         nng_sources(posix_rand_urandom.c)
     endif ()
+
+    nng_test(posix_ipcwinsec_test)
+
 endif ()

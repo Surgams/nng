@@ -50,7 +50,6 @@ nng_sources(
         pipe.c
         pipe.h
         platform.h
-        protocol.c
         protocol.h
         reap.c
         reap.h
@@ -83,4 +82,5 @@ nng_test(list_test)
 nng_test(message_test)
 nng_test(reconnect_test)
 nng_test(sock_test)
+nng_test(stats_test)
 nng_test(url_test)

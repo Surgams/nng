@@ -1,5 +1,5 @@
 //
-// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2022 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -16,17 +16,11 @@
 
 // Socket implementation.
 
-static nni_list   sock_list;
-static nni_id_map sock_ids;
-static nni_mtx    sock_lk;
-static nni_id_map ctx_ids;
-static bool       inited;
-
 struct nni_ctx {
 	nni_list_node     c_node;
-	nni_sock *        c_sock;
+	nni_sock         *c_sock;
 	nni_proto_ctx_ops c_ops;
-	void *            c_data;
+	void             *c_data;
 	size_t            c_size;
 	bool              c_closed;
 	unsigned          c_ref; // protected by global lock
@@ -37,15 +31,15 @@ struct nni_ctx {
 
 typedef struct nni_sockopt {
 	nni_list_node node;
-	char *        name;
+	char         *name;
 	nni_type      typ;
 	size_t        sz;
-	void *        data;
+	void         *data;
 } nni_sockopt;
 
 typedef struct nni_sock_pipe_cb {
 	nng_pipe_cb cb_fn;
-	void *      cb_arg;
+	void       *cb_arg;
 } nni_sock_pipe_cb;
 
 struct nni_socket {
@@ -57,7 +51,7 @@ struct nni_socket {
 	uint32_t s_id;
 	uint32_t s_flags;
 	unsigned s_ref;  // protected by global lock
-	void *   s_data; // Protocol private
+	void    *s_data; // Protocol private
 	size_t   s_size;
 
 	nni_msgq *s_uwq; // Upper write queue
@@ -107,10 +101,12 @@ struct nni_socket {
 #endif
 };
 
-static void nni_ctx_destroy(nni_ctx *);
+static nni_list sock_list  = NNI_LIST_INITIALIZER(sock_list, nni_sock, s_node);
+static nni_mtx  sock_lk    = NNI_MTX_INITIALIZER;
+static nni_id_map sock_ids = NNI_ID_MAP_INITIALIZER(1, 0x7fffffff, 0);
+static nni_id_map ctx_ids  = NNI_ID_MAP_INITIALIZER(1, 0x7fffffff, 0);
 
-static void dialer_shutdown_locked(nni_dialer *);
-static void listener_shutdown_locked(nni_listener *);
+static void nni_ctx_destroy(nni_ctx *);
 
 #define SOCK(s) ((nni_sock *) (s))
 
@@ -241,8 +237,15 @@ sock_get_sockname(void *s, void *buf, size_t *szp, nni_type t)
 static int
 sock_set_sockname(void *s, const void *buf, size_t sz, nni_type t)
 {
-	return (nni_copyin_str(
+	int rv;
+	rv = (nni_copyin_str(
 	    SOCK(s)->s_name, buf, sizeof(SOCK(s)->s_name), sz, t));
+#ifdef NNG_ENABLE_STATS
+	if (rv == 0) {
+		nni_stat_set_string(&SOCK(s)->st_name, SOCK(s)->s_name);
+	}
+#endif
+	return (rv);
 }
 
 static int
@@ -380,6 +383,14 @@ nni_sock_find(nni_sock **sockp, uint32_t id)
 	nni_mtx_unlock(&sock_lk);
 
 	return (rv);
+}
+
+void
+nni_sock_hold(nni_sock *s)
+{
+	nni_mtx_lock(&sock_lk);
+	s->s_ref++;
+	nni_mtx_unlock(&sock_lk);
 }
 
 void
@@ -581,25 +592,26 @@ nni_sock_create(nni_sock **sp, const nni_proto *proto)
 #endif
 
 	if (((rv = nni_msgq_init(&s->s_uwq, 0)) != 0) ||
-	    ((rv = nni_msgq_init(&s->s_urq, 1)) != 0) ||
-	    ((rv = s->s_sock_ops.sock_init(s->s_data, s)) != 0) ||
-	    ((rv = nni_sock_setopt(s, NNG_OPT_SENDTIMEO, &s->s_sndtimeo,
-	          sizeof(nni_duration), NNI_TYPE_DURATION)) != 0) ||
-	    ((rv = nni_sock_setopt(s, NNG_OPT_RECVTIMEO, &s->s_rcvtimeo,
-	          sizeof(nni_duration), NNI_TYPE_DURATION)) != 0) ||
-	    ((rv = nni_sock_setopt(s, NNG_OPT_RECONNMINT, &s->s_reconn,
-	          sizeof(nni_duration), NNI_TYPE_DURATION)) != 0) ||
-	    ((rv = nni_sock_setopt(s, NNG_OPT_RECONNMAXT, &s->s_reconnmax,
-	          sizeof(nni_duration), NNI_TYPE_DURATION)) != 0) ||
-	    ((rv = nni_sock_setopt(s, NNG_OPT_RECVMAXSZ, &s->s_rcvmaxsz,
-	          sizeof(size_t), NNI_TYPE_SIZE)) != 0)) {
+	    ((rv = nni_msgq_init(&s->s_urq, 1)) != 0)) {
 		sock_destroy(s);
 		return (rv);
 	}
+	s->s_sock_ops.sock_init(s->s_data, s);
 
-	// These we *attempt* to call so that we are likely to have initial
+	// These we *attempt* to set so that we are likely to have initial
 	// values loaded.  They should not fail, but if they do we don't
 	// worry about it.
+	(void) nni_sock_setopt(s, NNG_OPT_SENDTIMEO, &s->s_sndtimeo,
+	    sizeof(nni_duration), NNI_TYPE_DURATION);
+	(void) nni_sock_setopt(s, NNG_OPT_RECVTIMEO, &s->s_rcvtimeo,
+	    sizeof(nni_duration), NNI_TYPE_DURATION);
+	(void) nni_sock_setopt(s, NNG_OPT_RECONNMINT, &s->s_reconn,
+	    sizeof(nni_duration), NNI_TYPE_DURATION);
+	(void) nni_sock_setopt(s, NNG_OPT_RECONNMAXT, &s->s_reconnmax,
+	    sizeof(nni_duration), NNI_TYPE_DURATION);
+	(void) nni_sock_setopt(s, NNG_OPT_RECVMAXSZ, &s->s_rcvmaxsz,
+	    sizeof(size_t), NNI_TYPE_SIZE);
+
 	on = true;
 	(void) nni_sock_setopt(
 	    s, NNG_OPT_TCP_NODELAY, &on, sizeof(on), NNI_TYPE_BOOL);
@@ -609,27 +621,6 @@ nni_sock_create(nni_sock **sp, const nni_proto *proto)
 
 	*sp = s;
 	return (rv);
-}
-
-int
-nni_sock_sys_init(void)
-{
-	NNI_LIST_INIT(&sock_list, nni_sock, s_node);
-	nni_mtx_init(&sock_lk);
-
-	nni_id_map_init(&sock_ids, 1, 0x7fffffff, false);
-	nni_id_map_init(&ctx_ids, 1, 0x7fffffff, false);
-	inited = true;
-	return (0);
-}
-
-void
-nni_sock_sys_fini(void)
-{
-	nni_id_map_fini(&sock_ids);
-	nni_id_map_fini(&ctx_ids);
-	nni_mtx_fini(&sock_lk);
-	inited = false;
 }
 
 int
@@ -662,8 +653,11 @@ nni_sock_open(nni_sock **sockp, const nni_proto *proto)
 	(void) snprintf(s->s_name, sizeof(s->s_name), "%u", s->s_id);
 
 #ifdef NNG_ENABLE_STATS
-	// Set up basic stat values.
+	// Set up basic stat values.  The socket id wasn't
+	// known at stat creation time, so we set it now.
 	nni_stat_set_id(&s->st_id, (int) s->s_id);
+	nni_stat_set_id(&s->st_root, (int) s->s_id);
+	nni_stat_set_string(&s->st_name, s->s_name);
 
 	// Add our stats chain.
 	nni_stat_register(&s->st_root);
@@ -679,11 +673,11 @@ nni_sock_open(nni_sock **sockp, const nni_proto *proto)
 int
 nni_sock_shutdown(nni_sock *sock)
 {
-	nni_pipe *    pipe;
-	nni_dialer *  d;
+	nni_pipe     *pipe;
+	nni_dialer   *d;
 	nni_listener *l;
-	nni_ctx *     ctx;
-	nni_ctx *     nctx;
+	nni_ctx      *ctx;
+	nni_ctx      *nctx;
 
 	nni_mtx_lock(&sock->s_mx);
 	if (sock->s_closing) {
@@ -693,16 +687,26 @@ nni_sock_shutdown(nni_sock *sock)
 	// Mark us closing, so no more EPs or changes can occur.
 	sock->s_closing = true;
 
-	// Close the EPs. This prevents new connections from forming
-	// but but allows existing ones to drain.
-	NNI_LIST_FOREACH (&sock->s_listeners, l) {
-		listener_shutdown_locked(l);
-	}
-	NNI_LIST_FOREACH (&sock->s_dialers, d) {
-		dialer_shutdown_locked(d);
+	while ((l = nni_list_first(&sock->s_listeners)) != NULL) {
+		nni_listener_hold(l);
+		nni_list_node_remove(&l->l_node);
+		nni_mtx_unlock(&sock->s_mx);
+		nni_listener_close(l);
+		nni_mtx_lock(&sock->s_mx);
 	}
 
+	while ((d = nni_list_first(&sock->s_dialers)) != NULL) {
+		nni_dialer_hold(d);
+		nni_list_node_remove(&d->d_node);
+		nni_mtx_unlock(&sock->s_mx);
+		nni_dialer_close(d);
+		nni_mtx_lock(&sock->s_mx);
+	}
 	nni_mtx_unlock(&sock->s_mx);
+
+	// Close the upper queues immediately.
+	nni_msgq_close(sock->s_urq);
+	nni_msgq_close(sock->s_uwq);
 
 	// We now mark any owned contexts as closing.
 	// XXX: Add context draining support here!
@@ -720,14 +724,12 @@ nni_sock_shutdown(nni_sock *sock)
 		// If still has a reference count, then wait for last
 		// reference to close before nuking it.
 	}
-	nni_mtx_unlock(&sock_lk);
 
 	// Generally, unless the protocol is blocked trying to perform
 	// writes (e.g. a slow reader on the other side), it should be
 	// trying to shut things down.  We wait to give it
 	// a chance to do so gracefully.
 
-	nni_mtx_lock(&sock_lk);
 	while (!nni_list_empty(&sock->s_ctxs)) {
 		sock->s_ctxwait = true;
 		nni_cv_wait(&sock->s_close_cv);
@@ -738,41 +740,16 @@ nni_sock_shutdown(nni_sock *sock)
 
 	// At this point, we've done everything we politely can to
 	// give the protocol a chance to flush its write side.  Now
-	// its time to be a little more insistent.
-
-	// Close the upper queues immediately.  This can happen
-	// safely while we hold the lock.
-	nni_msgq_close(sock->s_urq);
-	nni_msgq_close(sock->s_uwq);
-
-	// Go through the dialers and listeners, attempting to close them.
-	// We might already have a close in progress, in which case
-	// we skip past it; it will be removed from another thread.
-	NNI_LIST_FOREACH (&sock->s_listeners, l) {
-		if (nni_listener_hold(l) == 0) {
-			nni_listener_close_rele(l);
-		}
-	}
-	NNI_LIST_FOREACH (&sock->s_dialers, d) {
-		if (nni_dialer_hold(d) == 0) {
-			nni_dialer_close_rele(d);
-		}
-	}
+	// it is time to be a little more insistent.
 
 	// For each pipe, arrange for it to teardown hard.  We would
-	// expect there not to be any here.  However, it is possible for
-	// a pipe to have been added by an endpoint due to racing conditions
-	// in the shutdown.  Therefore it is important that we shutdown pipes
-	// *last*.
+	// expect there not to be any here.
 	NNI_LIST_FOREACH (&sock->s_pipes, pipe) {
 		nni_pipe_close(pipe);
 	}
 
-	// We have to wait for *both* endpoints and pipes to be
-	// removed.
-	while ((!nni_list_empty(&sock->s_pipes)) ||
-	    (!nni_list_empty(&sock->s_listeners)) ||
-	    (!nni_list_empty(&sock->s_dialers))) {
+	// We have to wait for pipes to be removed.
+	while (!nni_list_empty(&sock->s_pipes)) {
 		nni_cv_wait(&sock->s_cv);
 	}
 
@@ -840,9 +817,6 @@ nni_sock_closeall(void)
 {
 	nni_sock *s;
 
-	if (!inited) {
-		return;
-	}
 	for (;;) {
 		nni_mtx_lock(&sock_lk);
 		if ((s = nni_list_first(&sock_list)) == NULL) {
@@ -1050,7 +1024,7 @@ nni_sock_setopt(
 		}
 #endif
 
-#if defined(NNG_PLATFORM_POSIX) && !defined(NNG_SUPPRESS_DEPRECATED)
+#if defined(NNG_PLATFORM_POSIX) && !defined(NNG_ELIDE_DEPRECATED)
 	} else if (strcmp(name, NNG_OPT_IPC_PERMISSIONS) == 0) {
 		// UNIX mode bits are 0777, but allow set id and sticky bits
 		if ((rv = nni_copyin_int(NULL, v, sz, 0, 07777, t)) != 0) {
@@ -1058,7 +1032,7 @@ nni_sock_setopt(
 		}
 #endif
 
-#if defined(NNG_PLATFORM_WINDOWS) && !defined(NNG_SUPPRESS_DEPRECATED)
+#if defined(NNG_PLATFORM_WINDOWS) && !defined(NNG_ELIDE_DEPRECATED)
 	} else if (strcmp(name, NNG_OPT_IPC_SECURITY_DESCRIPTOR) == 0) {
 		if ((rv = nni_copyin_ptr(NULL, v, sz, t)) == 0) {
 			return (rv);
@@ -1099,8 +1073,8 @@ nni_sock_setopt(
 		}
 	}
 
-#ifndef NNG_ELIDE_DEPRCATED
-	nni_dialer *  d;
+#ifndef NNG_ELIDE_DEPRECATED
+	nni_dialer   *d;
 	nni_listener *l;
 
 	// Apply the options.  Failure to set any option on any
@@ -1334,12 +1308,7 @@ nni_ctx_open(nni_ctx **ctxp, nni_sock *sock)
 		return (rv);
 	}
 
-	if ((rv = sock->s_ctx_ops.ctx_init(ctx->c_data, sock->s_data)) != 0) {
-		nni_id_remove(&ctx_ids, ctx->c_id);
-		nni_mtx_unlock(&sock_lk);
-		nni_free(ctx, ctx->c_size);
-		return (rv);
-	}
+	sock->s_ctx_ops.ctx_init(ctx->c_data, sock->s_data);
 
 	nni_list_append(&sock->s_ctxs, ctx);
 	nni_mtx_unlock(&sock_lk);
@@ -1392,7 +1361,7 @@ nni_ctx_recv(nni_ctx *ctx, nni_aio *aio)
 int
 nni_ctx_getopt(nni_ctx *ctx, const char *opt, void *v, size_t *szp, nni_type t)
 {
-	nni_sock *  sock = ctx->c_sock;
+	nni_sock   *sock = ctx->c_sock;
 	nni_option *o;
 	int         rv = NNG_ENOTSUP;
 
@@ -1422,7 +1391,7 @@ int
 nni_ctx_setopt(
     nni_ctx *ctx, const char *opt, const void *v, size_t sz, nni_type t)
 {
-	nni_sock *  sock = ctx->c_sock;
+	nni_sock   *sock = ctx->c_sock;
 	nni_option *o;
 	int         rv = NNG_ENOTSUP;
 
@@ -1453,11 +1422,7 @@ static void
 dialer_timer_start_locked(nni_dialer *d)
 {
 	nni_duration back_off;
-	nni_sock *   sock = d->d_sock;
 
-	if (d->d_closing || sock->s_closed) {
-		return;
-	}
 	back_off = d->d_currtime;
 	if (d->d_maxrtime > 0) {
 		d->d_currtime *= 2;
@@ -1494,11 +1459,6 @@ nni_dialer_add_pipe(nni_dialer *d, void *tpipe)
 
 	nni_mtx_lock(&s->s_mx);
 
-	if (s->s_closed || d->d_closing) {
-		d->d_tran->tran_pipe->p_fini(tpipe);
-		nni_mtx_unlock(&s->s_mx);
-		return;
-	}
 	if (nni_pipe_create_dialer(&p, d, tpipe) != 0) {
 		nni_mtx_unlock(&s->s_mx);
 		return;
@@ -1516,9 +1476,7 @@ nni_dialer_add_pipe(nni_dialer *d, void *tpipe)
 
 	nni_pipe_run_cb(p, NNG_PIPE_EV_ADD_PRE);
 
-	nni_mtx_lock(&s->s_mx);
-	if (p->p_closed) {
-		nni_mtx_unlock(&s->s_mx);
+	if (nni_pipe_is_closed(p)) {
 #ifdef NNG_ENABLE_STATS
 		nni_stat_inc(&d->st_reject, 1);
 		nni_stat_inc(&s->st_rejects, 1);
@@ -1526,8 +1484,8 @@ nni_dialer_add_pipe(nni_dialer *d, void *tpipe)
 		nni_pipe_rele(p);
 		return;
 	}
+
 	if (p->p_proto_ops.pipe_start(p->p_proto_data) != 0) {
-		nni_mtx_unlock(&s->s_mx);
 #ifdef NNG_ENABLE_STATS
 		nni_stat_inc(&d->st_reject, 1);
 		nni_stat_inc(&s->st_rejects, 1);
@@ -1536,46 +1494,32 @@ nni_dialer_add_pipe(nni_dialer *d, void *tpipe)
 		nni_pipe_rele(p);
 		return;
 	}
-	nni_mtx_unlock(&s->s_mx);
 #ifdef NNG_ENABLE_STATS
+	nni_stat_set_id(&p->st_root, (int) p->p_id);
+	nni_stat_set_id(&p->st_id, (int) p->p_id);
 	nni_stat_register(&p->st_root);
 #endif
 	nni_pipe_run_cb(p, NNG_PIPE_EV_ADD_POST);
 	nni_pipe_rele(p);
 }
 
-static void
-dialer_shutdown_impl(nni_dialer *d)
-{
-	nni_pipe *p;
-
-	// Abort any remaining in-flight operations.
-	nni_aio_close(&d->d_con_aio);
-	nni_aio_close(&d->d_tmo_aio);
-
-	// Stop the underlying transport.
-	d->d_ops.d_close(d->d_data);
-
-	NNI_LIST_FOREACH (&d->d_pipes, p) {
-		nni_pipe_close(p);
-	}
-}
-
-static void
-dialer_shutdown_locked(nni_dialer *d)
-{
-	if (!d->d_closing) {
-		d->d_closing = true;
-		dialer_shutdown_impl(d);
-	}
-}
-
 void
 nni_dialer_shutdown(nni_dialer *d)
 {
 	nni_sock *s = d->d_sock;
+	nni_pipe *p;
+
+	if (nni_atomic_flag_test_and_set(&d->d_closing)) {
+		return;
+	}
+
+	nni_dialer_stop(d);
+
 	nni_mtx_lock(&s->s_mx);
-	dialer_shutdown_locked(d);
+	NNI_LIST_FOREACH (&d->d_pipes, p) {
+		nni_pipe_close(p);
+	}
+	nni_list_node_remove(&d->d_node);
 	nni_mtx_unlock(&s->s_mx);
 }
 
@@ -1590,10 +1534,7 @@ static void
 dialer_reap(void *arg)
 {
 	nni_dialer *d = arg;
-	nni_sock *  s = d->d_sock;
-
-	nni_aio_stop(&d->d_tmo_aio);
-	nni_aio_stop(&d->d_con_aio);
+	nni_sock   *s = d->d_sock;
 
 #ifdef NNG_ENABLE_STATS
 	nni_stat_unregister(&d->st_root);
@@ -1612,12 +1553,11 @@ dialer_reap(void *arg)
 		return;
 	}
 
-	nni_list_remove(&s->s_dialers, d);
-	if ((s->s_closing) && (nni_list_empty(&s->s_dialers))) {
-		nni_cv_wake(&s->s_cv);
-	}
+	nni_list_node_remove(&d->d_node);
 
 	nni_mtx_unlock(&s->s_mx);
+
+	nni_sock_rele(s);
 
 	nni_dialer_destroy(d);
 }
@@ -1635,12 +1575,6 @@ nni_listener_add_pipe(nni_listener *l, void *tpipe)
 	nni_pipe *p;
 
 	nni_mtx_lock(&s->s_mx);
-	if (s->s_closed || l->l_closing) {
-		l->l_tran->tran_pipe->p_fini(tpipe);
-		nni_mtx_unlock(&s->s_mx);
-		return;
-	}
-
 	if (nni_pipe_create_listener(&p, l, tpipe) != 0) {
 		nni_mtx_unlock(&s->s_mx);
 		return;
@@ -1656,9 +1590,7 @@ nni_listener_add_pipe(nni_listener *l, void *tpipe)
 
 	nni_pipe_run_cb(p, NNG_PIPE_EV_ADD_PRE);
 
-	nni_mtx_lock(&s->s_mx);
-	if (p->p_closed) {
-		nni_mtx_unlock(&s->s_mx);
+	if (nni_pipe_is_closed(p)) {
 #ifdef NNG_ENABLE_STATS
 		nni_stat_inc(&l->st_reject, 1);
 		nni_stat_inc(&s->st_rejects, 1);
@@ -1667,7 +1599,6 @@ nni_listener_add_pipe(nni_listener *l, void *tpipe)
 		return;
 	}
 	if (p->p_proto_ops.pipe_start(p->p_proto_data) != 0) {
-		nni_mtx_unlock(&s->s_mx);
 #ifdef NNG_ENABLE_STATS
 		nni_stat_inc(&l->st_reject, 1);
 		nni_stat_inc(&s->st_rejects, 1);
@@ -1676,47 +1607,31 @@ nni_listener_add_pipe(nni_listener *l, void *tpipe)
 		nni_pipe_rele(p);
 		return;
 	}
-	nni_mtx_unlock(&s->s_mx);
 #ifdef NNG_ENABLE_STATS
+	nni_stat_set_id(&p->st_root, (int) p->p_id);
+	nni_stat_set_id(&p->st_id, (int) p->p_id);
 	nni_stat_register(&p->st_root);
 #endif
 	nni_pipe_run_cb(p, NNG_PIPE_EV_ADD_POST);
 	nni_pipe_rele(p);
 }
 
-static void
-listener_shutdown_impl(nni_listener *l)
-{
-	nni_pipe *p;
-
-	// Abort any remaining in-flight accepts.
-	nni_aio_close(&l->l_acc_aio);
-	nni_aio_close(&l->l_tmo_aio);
-
-	// Stop the underlying transport.
-	l->l_ops.l_close(l->l_data);
-
-	NNI_LIST_FOREACH (&l->l_pipes, p) {
-		nni_pipe_close(p);
-	}
-}
-
-static void
-listener_shutdown_locked(nni_listener *l)
-{
-	if (!l->l_closing) {
-		l->l_closing = true;
-		listener_shutdown_impl(l);
-	}
-}
-
 void
 nni_listener_shutdown(nni_listener *l)
 {
 	nni_sock *s = l->l_sock;
+	nni_pipe *p;
+
+	if (nni_atomic_flag_test_and_set(&l->l_closing)) {
+		return;
+	}
+
+	nni_listener_stop(l);
 
 	nni_mtx_lock(&s->s_mx);
-	listener_shutdown_locked(l);
+	NNI_LIST_FOREACH (&l->l_pipes, p) {
+		nni_pipe_close(p);
+	}
 	nni_mtx_unlock(&s->s_mx);
 }
 
@@ -1731,10 +1646,7 @@ static void
 listener_reap(void *arg)
 {
 	nni_listener *l = arg;
-	nni_sock *    s = l->l_sock;
-
-	nni_aio_stop(&l->l_tmo_aio);
-	nni_aio_stop(&l->l_acc_aio);
+	nni_sock     *s = l->l_sock;
 
 #ifdef NNG_ENABLE_STATS
 	nni_stat_unregister(&l->st_root);
@@ -1753,12 +1665,10 @@ listener_reap(void *arg)
 		return;
 	}
 
-	nni_list_remove(&s->s_listeners, l);
-	if ((s->s_closing) && (nni_list_empty(&s->s_listeners))) {
-		nni_cv_wake(&s->s_cv);
-	}
-
+	nni_list_node_remove(&l->l_node);
 	nni_mtx_unlock(&s->s_mx);
+
+	nni_sock_rele(s);
 
 	nni_listener_destroy(l);
 }
@@ -1772,9 +1682,9 @@ nni_listener_reap(nni_listener *l)
 void
 nni_pipe_run_cb(nni_pipe *p, nng_pipe_ev ev)
 {
-	nni_sock *  s = p->p_sock;
+	nni_sock   *s = p->p_sock;
 	nng_pipe_cb cb;
-	void *      arg;
+	void       *arg;
 
 	nni_mtx_lock(&s->s_pipe_cbs_mtx);
 	if (!p->p_cbs) {
@@ -1800,7 +1710,7 @@ nni_pipe_run_cb(nni_pipe *p, nng_pipe_ev ev)
 void
 nni_pipe_remove(nni_pipe *p)
 {
-	nni_sock *  s = p->p_sock;
+	nni_sock   *s = p->p_sock;
 	nni_dialer *d = p->p_dialer;
 
 	nni_mtx_lock(&s->s_mx);

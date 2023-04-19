@@ -1,6 +1,6 @@
 //
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
-// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2022 Staysail Systems, Inc. <info@staysail.tech>
 //
 // This software is supplied under the terms of the MIT License, a
 // copy of which should be located in the distribution where this
@@ -27,40 +27,57 @@
 // The certificate is valid for 100 years, because I don't want to
 // have to regenerate it ever again. The CN is 127.0.0.1, and self-signed.
 //
-// Generated using openssl:
-//
-// % openssl ecparam -name secp224r1 -genkey -out  key.key
-// % openssl req -new -key key.key -out cert.csr -sha256
-// % openssl x509 -req -in cert.csr -days 36500 -out cert.crt
-//    -signkey key.key -sha256
-//
-// Secp224r1 chosen as a least common denominator recommended by NIST-800.
-//
-//
 
 static const char cert[] =
     "-----BEGIN CERTIFICATE-----\n"
-    "MIIBzDCCAXkCCQCNJMf8eYUHxTAKBggqhkjOPQQDAjB2MQswCQYDVQQGEwJVUzEL\n"
-    "MAkGA1UECAwCQ0ExEjAQBgNVBAcMCVNhbiBEaWVnbzEUMBIGA1UECgwLbmFub21z\n"
-    "Zy5vcmcxHDAaBgNVBAsME1NhbXBsZSBDZXJ0aWZpY2F0ZXMxEjAQBgNVBAMMCWxv\n"
-    "Y2FsaG9zdDAgFw0yMDAyMjMxODMwMDZaGA8yMTIwMDEzMDE4MzAwNlowdjELMAkG\n"
-    "A1UEBhMCVVMxCzAJBgNVBAgMAkNBMRIwEAYDVQQHDAlTYW4gRGllZ28xFDASBgNV\n"
-    "BAoMC25hbm9tc2cub3JnMRwwGgYDVQQLDBNTYW1wbGUgQ2VydGlmaWNhdGVzMRIw\n"
-    "EAYDVQQDDAlsb2NhbGhvc3QwTjAQBgcqhkjOPQIBBgUrgQQAIQM6AAS9hA5gYo10\n"
-    "jx+gzJdzYbxHzigJYXawdHtyoAud/TT/dUCt0ycpOzTMiO3CoDNxep+/mkmgxjfp\n"
-    "ujAKBggqhkjOPQQDAgNBADA+Ah0A9b+GcfbhzzmI2NcYb4auE6XTYJPkPzHt6Adi\n"
-    "fwIdAMJO2LEr6WHH6JGLlishVqjF78TtkuB5t+kzneQ=\n"
+    "MIIDRzCCAi8CFCOIJGs6plMawgBYdDuCRV7UuJuyMA0GCSqGSIb3DQEBCwUAMF8x\n"
+    "CzAJBgNVBAYTAlhYMQ8wDQYDVQQIDAZVdG9waWExETAPBgNVBAcMCFBhcmFkaXNl\n"
+    "MRgwFgYDVQQKDA9OTkcgVGVzdHMsIEluYy4xEjAQBgNVBAMMCWxvY2FsaG9zdDAg\n"
+    "Fw0yMDA1MjMyMzMxMTlaGA8yMTIwMDQyOTIzMzExOVowXzELMAkGA1UEBhMCWFgx\n"
+    "DzANBgNVBAgMBlV0b3BpYTERMA8GA1UEBwwIUGFyYWRpc2UxGDAWBgNVBAoMD05O\n"
+    "RyBUZXN0cywgSW5jLjESMBAGA1UEAwwJbG9jYWxob3N0MIIBIjANBgkqhkiG9w0B\n"
+    "AQEFAAOCAQ8AMIIBCgKCAQEAyPdnRbMrQj9902TGQsmMbG6xTSl9XKbJr55BcnyZ\n"
+    "ifsrqA7BbNSkndVw9Qq+OJQIDBTfRhGdG+o9j3h6SDVvIb62fWtwJ5Fe0eUmeYwP\n"
+    "c1PKQzOmMFlMYekXiZsx60yu5LeuUhGlb84+csImH+m3NbutInPJcStSq0WfSV6V\n"
+    "Nk6DN3535ex66zV2Ms6ikys1vCC434YqIpe1VxUh+IC2widJcLDCxmmJt3TOlx5f\n"
+    "9OcKMkxuH4fMAzgjIEpIrUjdb19CGNVvsNrEEB2CShBMgBdqMaAnKFxpKgfzS0JF\n"
+    "ulxRGNtpsrweki+j+a4sJXTv40kELkRQS6uB6wWZNjcPywIDAQABMA0GCSqGSIb3\n"
+    "DQEBCwUAA4IBAQA86Fqrd4aiih6R3fwiMLwV6IQJv+u5rQeqA4D0xu6v6siP42SJ\n"
+    "YMaI2DkNGrWdSFVSHUK/efceCrhnMlW7VM8I1cyl2F/qKMfnT72cxqqquiKtQKdT\n"
+    "NDTzv61QMUP9n86HxMzGS7jg0Pknu55BsIRNK6ndDvI3D/K/rzZs4xbqWSSfNfQs\n"
+    "fNFBbOuDrkS6/1h3p8SY1uPM18WLVv3GO2T3aeNMHn7YJAKSn+sfaxzAPyPIK3UT\n"
+    "W8ecGQSHOqBJJQELyUfMu7lx/FCYKUhN7/1uhU5Qf1pCR8hkIMegtqr64yVBNMOn\n"
+    "248fuiHbs9BRknuA/PqjxIDDZTwtDrfVSO/S\n"
     "-----END CERTIFICATE-----\n";
 
 static const char key[] =
-    "-----BEGIN EC PARAMETERS-----\n"
-    "gUrgQQAIQ==\n"
-    "-----END EC PARAMETERS-----\n"
-    "-----BEGIN EC PRIVATE KEY-----\n"
-    "MGgCAQEEHChK068x8MWcBzhpO7qANvW4iTo7E0yzMYFXGn+gBwYFK4EEACGhPAM6\n"
-    "AAS9hA5gYo10jx+gzJdzYbxHzigJYXawdHtyoAud/TT/dUCt0ycpOzTMiO3CoDNx\n"
-    "ep+/mkmgxjfpug==\n"
-    "-----END EC PRIVATE KEY-----\n";
+    "-----BEGIN RSA PRIVATE KEY-----\n"
+    "MIIEowIBAAKCAQEAyPdnRbMrQj9902TGQsmMbG6xTSl9XKbJr55BcnyZifsrqA7B\n"
+    "bNSkndVw9Qq+OJQIDBTfRhGdG+o9j3h6SDVvIb62fWtwJ5Fe0eUmeYwPc1PKQzOm\n"
+    "MFlMYekXiZsx60yu5LeuUhGlb84+csImH+m3NbutInPJcStSq0WfSV6VNk6DN353\n"
+    "5ex66zV2Ms6ikys1vCC434YqIpe1VxUh+IC2widJcLDCxmmJt3TOlx5f9OcKMkxu\n"
+    "H4fMAzgjIEpIrUjdb19CGNVvsNrEEB2CShBMgBdqMaAnKFxpKgfzS0JFulxRGNtp\n"
+    "srweki+j+a4sJXTv40kELkRQS6uB6wWZNjcPywIDAQABAoIBAQCGSUsot+BgFCzv\n"
+    "5JbWafb7Pbwb421xS8HZJ9Zzue6e1McHNVTqc+zLyqQAGX2iMMhvykKnf32L+anJ\n"
+    "BKgxOANaeSVYCUKYLfs+JfDfp0druMGexhR2mjT/99FSkfF5WXREQLiq/j+dxiLU\n"
+    "bActq+5QaWf3bYddp6VF7O/TBvCNqBfD0+S0o0wtBdvxXItrKPTD5iKr9JfLWdAt\n"
+    "YNAk2QgFywFtY5zc2wt4queghF9GHeBzzZCuVj9QvPA4WdVq0mePaPTmvTYQUD0j\n"
+    "GT6X5j9JhqCwfh7trb/HfkmLHwwc62zPDFps+Dxao80+vss5b/EYZ4zY3S/K3vpG\n"
+    "f/e42S2BAoGBAP51HQYFJGC/wsNtOcX8RtXnRo8eYmyboH6MtBFrZxWl6ERigKCN\n"
+    "5Tjni7EI3nwi3ONg0ENPFkoQ8h0bcVFS7iW5kz5te73WaOFtpkU9rmuFDUz37eLP\n"
+    "d+JLZ5Kwfn2FM9HoiSAZAHowE0MIlmmIEXSnFtqA2zzorPQLO/4QlR+VAoGBAMov\n"
+    "R0yaHg3qPlxmCNyLXKiGaGNzvsvWjYw825uCGmVZfhzDhOiCFMaMb51BS5Uw/gwm\n"
+    "zHxmJjoqak8JjxaQ1qKPoeY1TJ5ps1+TRq9Wzm2/zGqJHOXnRPlqwBQ6AFllAMgt\n"
+    "Rlp5uqb8QJ+YEo6/1kdGhw9kZWCZEEue6MNQjxnfAoGARLkUkZ+p54di7qz9QX+V\n"
+    "EghYgibOpk6R1hviNiIvwSUByhZgbvxjwC6pB7NBg31W8wIevU8K0g4plbrnq/Md\n"
+    "5opsPhwLo4XY5albkq/J/7f7k6ISWYN2+WMsIe4Q+42SJUsMXeLiwh1h1mTnWrEp\n"
+    "JbxK69CJZbXhoDe4iDGqVNECgYAjlgS3n9ywWE1XmAHxR3osk1OmRYYMfJv3VfLV\n"
+    "QSYCNqkyyNsIzXR4qdkvVYHHJZNhcibFsnkB/dsuRCFyOFX+0McPLMxqiXIv3U0w\n"
+    "qVe2C28gRTfX40fJmpdqN/c9xMBJe2aJoClRIM8DCBIkG/HMI8a719DcGrS6iqKv\n"
+    "VeuKAwKBgEgD+KWW1KtoSjCBlS0NP8HjC/Rq7j99YhKE6b9h2slIa7JTO8RZKCa0\n"
+    "qbuomdUeJA3R8h+5CFkEKWqO2/0+dUdLNOjG+CaTFHaUJevzHOzIjpn+VsfCLV13\n"
+    "yupGzHG+tGtdrWgLn9Dzdp67cDfSnsSh+KODPECAAFfo+wPvD8DS\n"
+    "-----END RSA PRIVATE KEY-----\n";
 
 static int
 check_props_v4(nng_msg *msg)
@@ -75,7 +92,7 @@ check_props_v4(nng_msg *msg)
 	So(nng_pipe_id(p) > 0);
 
 	// Typed access
-	So(nng_pipe_getopt_sockaddr(p, NNG_OPT_LOCADDR, &la) == 0);
+	So(nng_pipe_get_addr(p, NNG_OPT_LOCADDR, &la) == 0);
 	So(la.s_family == NNG_AF_INET);
 	So(la.s_in.sa_port == htons(trantest_port - 1));
 	So(la.s_in.sa_port != 0);
@@ -83,24 +100,24 @@ check_props_v4(nng_msg *msg)
 
 	// Untyped access
 	z = sizeof(nng_sockaddr);
-	So(nng_pipe_getopt(p, NNG_OPT_REMADDR, &ra, &z) == 0);
+	So(nng_pipe_get(p, NNG_OPT_REMADDR, &ra, &z) == 0);
 	So(z == sizeof(ra));
 	So(ra.s_family == NNG_AF_INET);
 	So(ra.s_in.sa_port != 0);
 	So(ra.s_in.sa_addr == htonl(0x7f000001));
 
-	So(nng_pipe_getopt_bool(p, NNG_OPT_TCP_KEEPALIVE, &b) == 0);
+	So(nng_pipe_get_bool(p, NNG_OPT_TCP_KEEPALIVE, &b) == 0);
 	So(b == false); // default
 
-	So(nng_pipe_getopt_bool(p, NNG_OPT_TCP_NODELAY, &b) == 0);
+	So(nng_pipe_get_bool(p, NNG_OPT_TCP_NODELAY, &b) == 0);
 	So(b == true); // default
 
 	// Check for type enforcement
 	int i;
-	So(nng_pipe_getopt_int(p, NNG_OPT_REMADDR, &i) == NNG_EBADTYPE);
+	So(nng_pipe_get_int(p, NNG_OPT_REMADDR, &i) == NNG_EBADTYPE);
 
 	z = 1;
-	So(nng_pipe_getopt(p, NNG_OPT_REMADDR, &ra, &z) == NNG_EINVAL);
+	So(nng_pipe_get(p, NNG_OPT_REMADDR, &ra, &z) == NNG_EINVAL);
 
 	return (0);
 }
@@ -131,7 +148,7 @@ init_dialer_tls_ex(nng_dialer d, bool own_cert)
 		}
 	}
 
-	rv = nng_dialer_setopt_ptr(d, NNG_OPT_TLS_CONFIG, cfg);
+	rv = nng_dialer_set_ptr(d, NNG_OPT_TLS_CONFIG, cfg);
 
 out:
 	nng_tls_config_free(cfg);
@@ -156,7 +173,7 @@ init_listener_tls_ex(nng_listener l, int auth_mode)
 	if ((rv = nng_tls_config_own_cert(cfg, cert, key, NULL)) != 0) {
 		goto out;
 	}
-	if ((rv = nng_listener_setopt_ptr(l, NNG_OPT_TLS_CONFIG, cfg)) != 0) {
+	if ((rv = nng_listener_set_ptr(l, NNG_OPT_TLS_CONFIG, cfg)) != 0) {
 		goto out;
 	}
 	switch (auth_mode) {
@@ -204,7 +221,7 @@ init_dialer_tls_file(nng_dialer d)
 		return (rv);
 	}
 
-	rv = nng_dialer_setopt_string(d, NNG_OPT_TLS_CA_FILE, pth);
+	rv = nng_dialer_set_string(d, NNG_OPT_TLS_CA_FILE, pth);
 	nni_file_delete(pth);
 	nni_strfree(pth);
 
@@ -241,7 +258,7 @@ init_listener_tls_file(nng_listener l)
 		return (rv);
 	}
 
-	rv = nng_listener_setopt_string(l, NNG_OPT_TLS_CERT_KEY_FILE, pth);
+	rv = nng_listener_set_string(l, NNG_OPT_TLS_CERT_KEY_FILE, pth);
 	if (rv != 0) {
 		// We can wind up with EBUSY from the server already
 		// running.
@@ -264,7 +281,7 @@ TestMain("TLS Transport", {
 
 	tt.dialer_init   = init_dialer_tls;
 	tt.listener_init = init_listener_tls;
-	tt.tmpl          = "tls+tcp://127.0.0.1:%u";
+	tt.tmpl          = "tls+tcp://127.0.0.1:";
 	tt.proptest      = check_props_v4;
 
 	trantest_test(&tt);
@@ -279,7 +296,7 @@ TestMain("TLS Transport", {
 		So(nng_tls_register() == 0);
 		So(nng_pair_open(&s) == 0);
 		Reset({ nng_close(s); });
-		trantest_next_address(addr, "tls+tcp://*:%u");
+		trantest_next_address(addr, "tls+tcp://*:");
 		So(nng_dial(s, addr, NULL, 0) == NNG_EADDRINVAL);
 	});
 
@@ -297,14 +314,14 @@ TestMain("TLS Transport", {
 			nng_close(s2);
 			nng_close(s1);
 		});
-		trantest_next_address(addr, "tls+tcp://*:%u");
+		trantest_next_address(addr, "tls+tcp://*:");
 		So(nng_listener_create(&l, s1, addr) == 0);
 		So(init_listener_tls(l) == 0);
 		// reset port back one
-		trantest_prev_address(addr, "tls+tcp://127.0.0.1:%u");
+		trantest_prev_address(addr, "tls+tcp://127.0.0.1:");
 		So(nng_dialer_create(&d, s2, addr) == 0);
 		So(init_dialer_tls(d) == 0);
-		So(nng_dialer_setopt_int(
+		So(nng_dialer_set_int(
 		       d, NNG_OPT_TLS_AUTH_MODE, NNG_TLS_AUTH_MODE_NONE) == 0);
 		So(nng_listener_start(l, 0) == 0);
 		So(nng_dialer_start(d, 0) == 0);
@@ -327,10 +344,10 @@ TestMain("TLS Transport", {
 		So(nng_listener_create(&l, s1, "tls+tcp://127.0.0.1:0") == 0);
 		So(init_listener_tls(l) == 0);
 		So(nng_listener_start(l, 0) == 0);
-		So(nng_listener_getopt_string(l, NNG_OPT_URL, &addr) == 0);
+		So(nng_listener_get_string(l, NNG_OPT_URL, &addr) == 0);
 		So(nng_dialer_create(&d, s2, addr) == 0);
 		So(init_dialer_tls(d) == 0);
-		So(nng_dialer_setopt_int(
+		So(nng_dialer_set_int(
 		       d, NNG_OPT_TLS_AUTH_MODE, NNG_TLS_AUTH_MODE_NONE) == 0);
 		So(nng_dialer_start(d, 0) == 0);
 		nng_strfree(addr);
@@ -373,13 +390,12 @@ TestMain("TLS Transport", {
 			nng_close(s2);
 			nng_close(s1);
 		});
-		trantest_next_address(addr, "tls+tcp://127.0.0.1:%u");
+		trantest_next_address(addr, "tls+tcp://127.0.0.1:");
 		So(nng_listener_create(&l, s1, addr) == 0);
 		So(init_listener_tls(l) == 0);
 		So(nng_listener_start(l, 0) == 0);
 		// reset port back one
-		trantest_prev_address(
-		    addr, "tls+tcp://127.0.0.1;127.0.0.1:%u");
+		trantest_prev_address(addr, "tls+tcp://127.0.0.1;127.0.0.1:");
 		So(nng_dialer_create(&d, s2, addr) == 0);
 		So(init_dialer_tls(d) == 0);
 		So(nng_dialer_start(d, 0) == 0);
@@ -419,15 +435,15 @@ TestMain("TLS Transport", {
 			nng_close(s2);
 			nng_close(s1);
 		});
-		trantest_next_address(addr, "tls+tcp://:%u");
+		trantest_next_address(addr, "tls+tcp://:");
 		So(nng_listener_create(&l, s1, addr) == 0);
 		So(init_listener_tls_file(NULL, l) == 0);
 		So(nng_listener_start(l, 0) == 0);
 		nng_msleep(100);
 
 		// reset port back one
-		trantest_prev_address(addr, "tls+tcp://127.0.0.1:%u");
-		So(nng_setopt_int(s2, NNG_OPT_TLS_AUTH_MODE,
+		trantest_prev_address(addr, "tls+tcp://127.0.0.1:");
+		So(nng_socket_set_int(s2, NNG_OPT_TLS_AUTH_MODE,
 		       NNG_TLS_AUTH_MODE_REQUIRED) == 0);
 
 		So(nng_dial(s2, addr, NULL, 0) == NNG_EPEERAUTH);
@@ -449,20 +465,20 @@ TestMain("TLS Transport", {
 			nng_close(s2);
 			nng_close(s1);
 		});
-		trantest_next_address(addr, "tls+tcp://*:%u");
+		trantest_next_address(addr, "tls+tcp://*:");
 		So(nng_listener_create(&l, s1, addr) == 0);
 		So(init_listener_tls_file(l) == 0);
-		So(nng_listener_setopt_int(l, NNG_OPT_TLS_AUTH_MODE,
+		So(nng_listener_set_int(l, NNG_OPT_TLS_AUTH_MODE,
 		       NNG_TLS_AUTH_MODE_OPTIONAL) == 0);
 		So(nng_listener_start(l, 0) == 0);
 		nng_msleep(100);
 
 		// reset port back one
-		trantest_prev_address(addr, "tls+tcp://127.0.0.1:%u");
-		So(nng_setopt_ms(s2, NNG_OPT_RECVTIMEO, 200) == 0);
+		trantest_prev_address(addr, "tls+tcp://127.0.0.1:");
+		So(nng_socket_set_ms(s2, NNG_OPT_RECVTIMEO, 200) == 0);
 		So(nng_dialer_create(&d, s2, addr) == 0);
 		So(init_dialer_tls_file(d) == 0);
-		So(nng_dialer_setopt_string(
+		So(nng_dialer_set_string(
 		       d, NNG_OPT_TLS_SERVER_NAME, "localhost") == 0);
 		So(nng_dialer_start(d, 0) == 0);
 
@@ -473,7 +489,7 @@ TestMain("TLS Transport", {
 		So(strcmp(nng_msg_body(msg), "hello") == 0);
 		p = nng_msg_get_pipe(msg);
 		So(nng_pipe_id(p) > 0);
-		So(nng_pipe_getopt_bool(p, NNG_OPT_TLS_VERIFIED, &b) == 0);
+		So(nng_pipe_get_bool(p, NNG_OPT_TLS_VERIFIED, &b) == 0);
 		So(b == false);
 		nng_msg_free(msg);
 	});
@@ -494,7 +510,7 @@ TestMain("TLS Transport", {
 			nng_close(s2);
 			nng_close(s1);
 		});
-		trantest_next_address(addr, "tls+tcp4://*:%u");
+		trantest_next_address(addr, "tls+tcp4://*:");
 		So(nng_listener_create(&l, s1, addr) == 0);
 		So(init_listener_tls_ex(l, NNG_TLS_AUTH_MODE_REQUIRED) == 0);
 		So(nng_listener_start(l, 0) == 0);
@@ -502,11 +518,11 @@ TestMain("TLS Transport", {
 		nng_msleep(100);
 
 		// reset port back one
-		trantest_prev_address(addr, "tls+tcp4://localhost:%u");
+		trantest_prev_address(addr, "tls+tcp4://localhost:");
 		So(nng_dialer_create(&d, s2, addr) == 0);
 		So(init_dialer_tls_ex(d, true) == 0);
 
-		So(nng_setopt_ms(s2, NNG_OPT_RECVTIMEO, 200) == 0);
+		So(nng_socket_set_ms(s2, NNG_OPT_RECVTIMEO, 200) == 0);
 		So(nng_dialer_start(d, 0) == 0);
 		nng_msleep(100);
 
@@ -519,10 +535,10 @@ TestMain("TLS Transport", {
 		So(strcmp(nng_msg_body(msg), "hello") == 0);
 		p = nng_msg_get_pipe(msg);
 		So(nng_pipe_id(p) > 0);
-		So(nng_pipe_getopt_bool(p, NNG_OPT_TLS_VERIFIED, &b) == 0);
+		So(nng_pipe_get_bool(p, NNG_OPT_TLS_VERIFIED, &b) == 0);
 		So(b == true);
 		int i;
-		So(nng_pipe_getopt_int(p, NNG_OPT_TLS_VERIFIED, &i) ==
+		So(nng_pipe_get_int(p, NNG_OPT_TLS_VERIFIED, &i) ==
 		    NNG_EBADTYPE);
 		nng_msg_free(msg);
 	});
@@ -536,44 +552,44 @@ TestMain("TLS Transport", {
 
 		So(nng_pair_open(&s) == 0);
 		Reset({ nng_close(s); });
-		So(nng_getopt_bool(s, NNG_OPT_TCP_NODELAY, &v) == 0);
+		So(nng_socket_get_bool(s, NNG_OPT_TCP_NODELAY, &v) == 0);
 		So(v == true);
 		So(nng_dialer_create(&d, s, "tcp://127.0.0.1:4999") == 0);
-		So(nng_dialer_getopt_bool(d, NNG_OPT_TCP_NODELAY, &v) == 0);
+		So(nng_dialer_get_bool(d, NNG_OPT_TCP_NODELAY, &v) == 0);
 		So(v == true);
-		So(nng_dialer_setopt_bool(d, NNG_OPT_TCP_NODELAY, false) == 0);
-		So(nng_dialer_getopt_bool(d, NNG_OPT_TCP_NODELAY, &v) == 0);
+		So(nng_dialer_set_bool(d, NNG_OPT_TCP_NODELAY, false) == 0);
+		So(nng_dialer_get_bool(d, NNG_OPT_TCP_NODELAY, &v) == 0);
 		So(v == false);
-		So(nng_dialer_getopt_int(d, NNG_OPT_TCP_NODELAY, &x) ==
+		So(nng_dialer_get_int(d, NNG_OPT_TCP_NODELAY, &x) ==
 		    NNG_EBADTYPE);
 		x = 0;
-		So(nng_dialer_setopt_int(d, NNG_OPT_TCP_NODELAY, x) ==
+		So(nng_dialer_set_int(d, NNG_OPT_TCP_NODELAY, x) ==
 		    NNG_EBADTYPE);
 		// This assumes sizeof (bool) != sizeof (int)
-		So(nng_dialer_setopt(d, NNG_OPT_TCP_NODELAY, &x, sizeof(x)) ==
+		So(nng_dialer_set(d, NNG_OPT_TCP_NODELAY, &x, sizeof(x)) ==
 		    NNG_EINVAL);
 
 		So(nng_listener_create(&l, s, "tcp://127.0.0.1:4999") == 0);
-		So(nng_listener_getopt_bool(l, NNG_OPT_TCP_NODELAY, &v) == 0);
+		So(nng_listener_get_bool(l, NNG_OPT_TCP_NODELAY, &v) == 0);
 		So(v == true);
 		x = 0;
-		So(nng_listener_setopt_int(l, NNG_OPT_TCP_NODELAY, x) ==
+		So(nng_listener_set_int(l, NNG_OPT_TCP_NODELAY, x) ==
 		    NNG_EBADTYPE);
 		// This assumes sizeof (bool) != sizeof (int)
-		So(nng_listener_setopt(
+		So(nng_listener_set(
 		       l, NNG_OPT_TCP_NODELAY, &x, sizeof(x)) == NNG_EINVAL);
 
 		nng_dialer_close(d);
 		nng_listener_close(l);
 
 		// Make sure socket wide defaults apply.
-		So(nng_setopt_bool(s, NNG_OPT_TCP_NODELAY, true) == 0);
+		So(nng_socket_set_bool(s, NNG_OPT_TCP_NODELAY, true) == 0);
 		v = false;
-		So(nng_getopt_bool(s, NNG_OPT_TCP_NODELAY, &v) == 0);
+		So(nng_socket_get_bool(s, NNG_OPT_TCP_NODELAY, &v) == 0);
 		So(v == true);
-		So(nng_setopt_bool(s, NNG_OPT_TCP_NODELAY, false) == 0);
+		So(nng_socket_set_bool(s, NNG_OPT_TCP_NODELAY, false) == 0);
 		So(nng_dialer_create(&d, s, "tcp://127.0.0.1:4999") == 0);
-		So(nng_dialer_getopt_bool(d, NNG_OPT_TCP_NODELAY, &v) == 0);
+		So(nng_dialer_get_bool(d, NNG_OPT_TCP_NODELAY, &v) == 0);
 		So(v == false);
 	});
 
@@ -586,40 +602,40 @@ TestMain("TLS Transport", {
 
 		So(nng_pair_open(&s) == 0);
 		Reset({ nng_close(s); });
-		So(nng_getopt_bool(s, NNG_OPT_TCP_KEEPALIVE, &v) == 0);
+		So(nng_socket_get_bool(s, NNG_OPT_TCP_KEEPALIVE, &v) == 0);
 		So(v == false);
 		So(nng_dialer_create(&d, s, "tcp://127.0.0.1:4999") == 0);
-		So(nng_dialer_getopt_bool(d, NNG_OPT_TCP_KEEPALIVE, &v) == 0);
+		So(nng_dialer_get_bool(d, NNG_OPT_TCP_KEEPALIVE, &v) == 0);
 		So(v == false);
-		So(nng_dialer_setopt_bool(d, NNG_OPT_TCP_KEEPALIVE, true) ==
+		So(nng_dialer_set_bool(d, NNG_OPT_TCP_KEEPALIVE, true) ==
 		    0);
-		So(nng_dialer_getopt_bool(d, NNG_OPT_TCP_KEEPALIVE, &v) == 0);
+		So(nng_dialer_get_bool(d, NNG_OPT_TCP_KEEPALIVE, &v) == 0);
 		So(v == true);
-		So(nng_dialer_getopt_int(d, NNG_OPT_TCP_KEEPALIVE, &x) ==
+		So(nng_dialer_get_int(d, NNG_OPT_TCP_KEEPALIVE, &x) ==
 		    NNG_EBADTYPE);
 		x = 1;
-		So(nng_dialer_setopt_int(d, NNG_OPT_TCP_KEEPALIVE, x) ==
+		So(nng_dialer_set_int(d, NNG_OPT_TCP_KEEPALIVE, x) ==
 		    NNG_EBADTYPE);
 
 		So(nng_listener_create(&l, s, "tcp://127.0.0.1:4999") == 0);
-		So(nng_listener_getopt_bool(l, NNG_OPT_TCP_KEEPALIVE, &v) ==
+		So(nng_listener_get_bool(l, NNG_OPT_TCP_KEEPALIVE, &v) ==
 		    0);
 		So(v == false);
 		x = 1;
-		So(nng_listener_setopt_int(l, NNG_OPT_TCP_KEEPALIVE, x) ==
+		So(nng_listener_set_int(l, NNG_OPT_TCP_KEEPALIVE, x) ==
 		    NNG_EBADTYPE);
 
 		nng_dialer_close(d);
 		nng_listener_close(l);
 
 		// Make sure socket wide defaults apply.
-		So(nng_setopt_bool(s, NNG_OPT_TCP_KEEPALIVE, false) == 0);
+		So(nng_socket_set_bool(s, NNG_OPT_TCP_KEEPALIVE, false) == 0);
 		v = true;
-		So(nng_getopt_bool(s, NNG_OPT_TCP_KEEPALIVE, &v) == 0);
+		So(nng_socket_get_bool(s, NNG_OPT_TCP_KEEPALIVE, &v) == 0);
 		So(v == false);
-		So(nng_setopt_bool(s, NNG_OPT_TCP_KEEPALIVE, true) == 0);
+		So(nng_socket_set_bool(s, NNG_OPT_TCP_KEEPALIVE, true) == 0);
 		So(nng_dialer_create(&d, s, "tcp://127.0.0.1:4999") == 0);
-		So(nng_dialer_getopt_bool(d, NNG_OPT_TCP_KEEPALIVE, &v) == 0);
+		So(nng_dialer_get_bool(d, NNG_OPT_TCP_KEEPALIVE, &v) == 0);
 		So(v == true);
 	});
 })

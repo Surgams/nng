@@ -1,6 +1,6 @@
 = nng_recvmsg(3)
 //
-// Copyright 2018 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This document is supplied under the terms of the MIT License, a
@@ -11,7 +11,7 @@
 
 == NAME
 
-nng_recvmsg - recv message
+nng_recvmsg - receive a message
 
 == SYNOPSIS
 
@@ -67,4 +67,5 @@ xref:nng_msg_free.3.adoc[nng_msg_free(3)],
 xref:nng_recv.3.adoc[nng_recv(3)],
 xref:nng_sendmsg.3.adoc[nng_sendmsg(3)],
 xref:nng_strerror.3.adoc[nng_strerror(3)],
+xref:nng_socket.5.adoc[nng_socket(5)],
 xref:nng.7.adoc[nng(7)]

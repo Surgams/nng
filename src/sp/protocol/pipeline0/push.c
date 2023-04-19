@@ -1,5 +1,5 @@
 //
-// Copyright 2020 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -43,15 +43,15 @@ struct push0_sock {
 
 // push0_pipe is our per-pipe protocol private structure.
 struct push0_pipe {
-	nni_pipe *    pipe;
-	push0_sock *  push;
+	nni_pipe     *pipe;
+	push0_sock   *push;
 	nni_list_node node;
 
 	nni_aio aio_recv;
 	nni_aio aio_send;
 };
 
-static int
+static void
 push0_sock_init(void *arg, nni_sock *sock)
 {
 	push0_sock *s = arg;
@@ -62,8 +62,6 @@ push0_sock_init(void *arg, nni_sock *sock)
 	NNI_LIST_INIT(&s->pl, push0_pipe, node);
 	nni_lmq_init(&s->wq, 0); // initially we start unbuffered.
 	nni_pollable_init(&s->writable);
-
-	return (0);
 }
 
 static void
@@ -85,7 +83,7 @@ static void
 push0_sock_close(void *arg)
 {
 	push0_sock *s = arg;
-	nni_aio *   a;
+	nni_aio    *a;
 	nni_mtx_lock(&s->m);
 	while ((a = nni_list_first(&s->aq)) != NULL) {
 		nni_aio_list_remove(a);
@@ -182,9 +180,9 @@ static void
 push0_pipe_ready(push0_pipe *p)
 {
 	push0_sock *s = p->push;
-	nni_msg *   m;
-	nni_aio *   a = NULL;
-	size_t      l;
+	nni_msg    *m;
+	nni_aio    *a = NULL;
+	size_t      l = 0;
 	bool        blocked;
 
 	nni_mtx_lock(&s->m);
@@ -193,7 +191,7 @@ push0_pipe_ready(push0_pipe *p)
 
 	// if  message is waiting in the buffered queue
 	// then we prefer that.
-	if (nni_lmq_getq(&s->wq, &m) == 0) {
+	if (nni_lmq_get(&s->wq, &m) == 0) {
 		nni_aio_set_msg(&p->aio_send, m);
 		nni_pipe_send(p->pipe, &p->aio_send);
 
@@ -201,7 +199,7 @@ push0_pipe_ready(push0_pipe *p)
 			nni_aio_list_remove(a);
 			m = nni_aio_get_msg(a);
 			l = nni_msg_len(m);
-			nni_lmq_putq(&s->wq, m);
+			nni_lmq_put(&s->wq, m);
 		}
 
 	} else if ((a = nni_list_first(&s->aq)) != NULL) {
@@ -266,7 +264,7 @@ push0_sock_send(void *arg, nni_aio *aio)
 {
 	push0_sock *s = arg;
 	push0_pipe *p;
-	nni_msg *   m;
+	nni_msg    *m;
 	size_t      l;
 	int         rv;
 
@@ -299,8 +297,8 @@ push0_sock_send(void *arg, nni_aio *aio)
 		return;
 	}
 
-	// Can we maybe queue it.
-	if (nni_lmq_putq(&s->wq, m) == 0) {
+	// Can we queue it?
+	if (nni_lmq_put(&s->wq, m) == 0) {
 		// Yay, we can.  So we're done.
 		nni_aio_set_msg(aio, NULL);
 		nni_aio_finish(aio, 0, l);
@@ -356,7 +354,7 @@ push0_get_send_buf_len(void *arg, void *buf, size_t *szp, nni_opt_type t)
 	int         val;
 
 	nni_mtx_lock(&s->m);
-	val = nni_lmq_cap(&s->wq);
+	val = (int) nni_lmq_cap(&s->wq);
 	nni_mtx_unlock(&s->m);
 
 	return (nni_copyout_int(val, buf, szp, t));

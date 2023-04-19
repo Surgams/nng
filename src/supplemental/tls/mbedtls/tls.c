@@ -1,5 +1,5 @@
 //
-// Copyright 2020 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 // Copyright 2019 Devolutions <info@devolutions.net>
 //
@@ -44,13 +44,13 @@ static nni_mtx                  rng_lock;
 #endif
 
 struct nng_tls_engine_conn {
-	void *              tls; // parent conn
+	void               *tls; // parent conn
 	mbedtls_ssl_context ctx;
 };
 
 struct nng_tls_engine_config {
 	mbedtls_ssl_config cfg_ctx;
-	char *             server_name;
+	char              *server_name;
 	mbedtls_x509_crt   ca_certs;
 	mbedtls_x509_crl   crl;
 	int                min_ver;
@@ -104,14 +104,29 @@ static struct {
 	int tls;
 	int nng;
 } tls_errs[] = {
+#ifdef MBEDTLS_ERR_SSL_NO_CLIENT_CERTIFICATE
 	{ MBEDTLS_ERR_SSL_NO_CLIENT_CERTIFICATE, NNG_EPEERAUTH },
+#endif
+#ifdef MBEDTLS_ERR_SSL_CA_CHAIN_REQUIRED
 	{ MBEDTLS_ERR_SSL_CA_CHAIN_REQUIRED, NNG_EPEERAUTH },
+#endif
+#ifdef MBEDTLS_ERR_SSL_PEER_VERIFY_FAILED
 	{ MBEDTLS_ERR_SSL_PEER_VERIFY_FAILED, NNG_EPEERAUTH },
+#endif
+#ifdef MBEDTLS_ERR_SSL_NO_USABLE_CIPHERSUITE
 	{ MBEDTLS_ERR_SSL_NO_USABLE_CIPHERSUITE, NNG_EPEERAUTH },
+#endif
 	{ MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY, NNG_ECONNREFUSED },
 	{ MBEDTLS_ERR_SSL_ALLOC_FAILED, NNG_ENOMEM },
 	{ MBEDTLS_ERR_SSL_TIMEOUT, NNG_ETIMEDOUT },
 	{ MBEDTLS_ERR_SSL_CONN_EOF, NNG_ECLOSED },
+// MbedTLS 3.0 error codes
+#ifdef MBEDTLS_ERR_SSL_HANDSHAKE_FAILURE
+	{ MBEDTLS_ERR_SSL_HANDSHAKE_FAILURE, NNG_EPEERAUTH },
+#endif
+#ifdef MBEDTLS_ERR_SSL_BAD_CERTIFICATE
+	{ MBEDTLS_ERR_SSL_BAD_CERTIFICATE, NNG_EPEERAUTH },
+#endif
 	// terminator
 	{ 0, 0 },
 };
@@ -261,6 +276,74 @@ conn_verified(nng_tls_engine_conn *ec)
 	return (mbedtls_ssl_get_verify_result(&ec->ctx) == 0);
 }
 
+static char *
+conn_peer_cn(nng_tls_engine_conn *ec)
+{
+	const mbedtls_x509_crt *crt = mbedtls_ssl_get_peer_cert(&ec->ctx);
+	if (!crt) {
+		return (NULL);
+	}
+
+	char buf[0x400];
+	int  len = mbedtls_x509_dn_gets(buf, sizeof(buf), &crt->subject);
+	if (len <= 0) {
+		return (NULL);
+	}
+
+	const char *pos = strstr(buf, "CN=");
+	if (!pos) {
+		return (NULL);
+	}
+
+	pos += 3;
+	len -= pos - buf - 1;
+	if (len <= 1) {
+		return (NULL);
+	}
+
+	char *rv = malloc(len);
+	memcpy(rv, pos, len);
+	return (rv);
+}
+
+static char **
+conn_peer_alt_names(nng_tls_engine_conn *ec)
+{
+	const mbedtls_x509_crt *crt = mbedtls_ssl_get_peer_cert(&ec->ctx);
+	if (!crt) {
+		return (NULL);
+	}
+
+	const mbedtls_asn1_sequence * seq = &crt->subject_alt_names;
+
+	// get count
+	int count = 0;
+	do {
+		if (seq->buf.len > 0) ++count;
+		seq = seq->next;
+	} while (seq);
+	if (count == 0) return NULL;
+
+	seq = &crt->subject_alt_names;
+
+	// copy strings
+	char ** rv = malloc((count + 1) * sizeof(char *));
+	int i = 0;
+	do {
+		if (seq->buf.len == 0) continue;
+
+		rv[i] = malloc(seq->buf.len + 1);
+		memcpy(rv[i], seq->buf.p, seq->buf.len);
+		rv[i][seq->buf.len] = 0;
+		++i;
+
+		seq = seq->next;
+	} while (seq);
+	rv[i] = NULL;
+
+	return rv;
+}
+
 static void
 config_fini(nng_tls_engine_config *cfg)
 {
@@ -337,7 +420,7 @@ config_server_name(nng_tls_engine_config *cfg, const char *name)
 	if ((dup = nni_strdup(name)) == NULL) {
 		return (NNG_ENOMEM);
 	}
-	if (cfg->server_name) {
+	if (cfg->server_name != NULL) {
 		nni_strfree(cfg->server_name);
 	}
 	cfg->server_name = dup;
@@ -395,7 +478,7 @@ config_own_cert(nng_tls_engine_config *cfg, const char *cert, const char *key,
 {
 	size_t         len;
 	const uint8_t *pem;
-	pair *         p;
+	pair          *p;
 	int            rv;
 
 	if ((p = NNI_ALLOC_STRUCT(p)) == NULL) {
@@ -413,8 +496,13 @@ config_own_cert(nng_tls_engine_config *cfg, const char *cert, const char *key,
 
 	pem = (const uint8_t *) key;
 	len = strlen(key) + 1;
-	rv  = mbedtls_pk_parse_key(&p->key, pem, len, (const uint8_t *) pass,
-            pass != NULL ? strlen(pass) : 0);
+#if MBEDTLS_VERSION_MAJOR < 3
+	rv = mbedtls_pk_parse_key(&p->key, pem, len, (const uint8_t *) pass,
+	    pass != NULL ? strlen(pass) : 0);
+#else
+	rv = mbedtls_pk_parse_key(&p->key, pem, len, (const uint8_t *) pass,
+	    pass != NULL ? strlen(pass) : 0, tls_random, NULL);
+#endif
 	if (rv != 0) {
 		rv = tls_mk_err(rv);
 		goto err;
@@ -448,12 +536,16 @@ config_version(nng_tls_engine_config *cfg, nng_tls_version min_ver,
 		return (NNG_ENOTSUP);
 	}
 	switch (min_ver) {
+#ifdef MBEDTLS_SSL_MINOR_VERSION_1
 	case NNG_TLS_1_0:
 		v1 = MBEDTLS_SSL_MINOR_VERSION_1;
 		break;
+#endif
+#ifdef MBEDTLS_SSL_MINOR_VERSION_2
 	case NNG_TLS_1_1:
 		v1 = MBEDTLS_SSL_MINOR_VERSION_2;
 		break;
+#endif
 	case NNG_TLS_1_2:
 		v1 = MBEDTLS_SSL_MINOR_VERSION_3;
 		break;
@@ -462,12 +554,16 @@ config_version(nng_tls_engine_config *cfg, nng_tls_version min_ver,
 	}
 
 	switch (max_ver) {
+#ifdef MBEDTLS_SSL_MINOR_VERSION_1
 	case NNG_TLS_1_0:
 		v2 = MBEDTLS_SSL_MINOR_VERSION_1;
 		break;
+#endif
+#ifdef MBEDTLS_SSL_MINOR_VERSION_2
 	case NNG_TLS_1_1:
 		v2 = MBEDTLS_SSL_MINOR_VERSION_2;
 		break;
+#endif
 	case NNG_TLS_1_2:
 	case NNG_TLS_1_3: // We lack support for 1.3, so treat as 1.2.
 		v2 = MBEDTLS_SSL_MINOR_VERSION_3;
@@ -498,14 +594,16 @@ static nng_tls_engine_config_ops config_ops = {
 };
 
 static nng_tls_engine_conn_ops conn_ops = {
-	.size      = sizeof(nng_tls_engine_conn),
-	.init      = conn_init,
-	.fini      = conn_fini,
-	.close     = conn_close,
-	.recv      = conn_recv,
-	.send      = conn_send,
-	.handshake = conn_handshake,
-	.verified  = conn_verified,
+	.size           = sizeof(nng_tls_engine_conn),
+	.init           = conn_init,
+	.fini           = conn_fini,
+	.close          = conn_close,
+	.recv           = conn_recv,
+	.send           = conn_send,
+	.handshake      = conn_handshake,
+	.verified       = conn_verified,
+	.peer_cn        = conn_peer_cn,
+	.peer_alt_names = conn_peer_alt_names,
 };
 
 static nng_tls_engine tls_engine_mbed = {

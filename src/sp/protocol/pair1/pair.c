@@ -32,9 +32,9 @@ static void pair1_pipe_send(pair1_pipe *, nni_msg *);
 
 // pair1_sock is our per-socket protocol private structure.
 struct pair1_sock {
-	nni_sock *     sock;
+	nni_sock      *sock;
 	bool           raw;
-	pair1_pipe *   p;
+	pair1_pipe    *p;
 	nni_atomic_int ttl;
 	nni_mtx        mtx;
 	nni_lmq        wmq;
@@ -63,7 +63,7 @@ struct pair1_sock {
 
 // pair1_pipe is our per-pipe protocol private structure.
 struct pair1_pipe {
-	nni_pipe *  pipe;
+	nni_pipe   *pipe;
 	pair1_sock *pair;
 	nni_aio     aio_send;
 	nni_aio     aio_recv;
@@ -91,7 +91,7 @@ pair1_add_sock_stat(
 }
 #endif
 
-static int
+static void
 pair1_sock_init_impl(void *arg, nni_sock *sock, bool raw)
 {
 	pair1_sock *s = arg;
@@ -179,20 +179,18 @@ pair1_sock_init_impl(void *arg, nni_sock *sock, bool raw)
 	nni_stat_set_bool(&s->stat_raw, raw);
 	nni_stat_set_bool(&s->stat_poly, false);
 #endif
-
-	return (0);
 }
 
-static int
+static void
 pair1_sock_init(void *arg, nni_sock *sock)
 {
-	return (pair1_sock_init_impl(arg, sock, false));
+	pair1_sock_init_impl(arg, sock, false);
 }
 
-static int
+static void
 pair1_sock_init_raw(void *arg, nni_sock *sock)
 {
-	return (pair1_sock_init_impl(arg, sock, true));
+	pair1_sock_init_impl(arg, sock, true);
 }
 
 static void
@@ -302,11 +300,11 @@ pair1_pipe_recv_cb(void *arg)
 {
 	pair1_pipe *p = arg;
 	pair1_sock *s = p->pair;
-	nni_msg *   msg;
+	nni_msg    *msg;
 	uint32_t    hdr;
-	nni_pipe *  pipe = p->pipe;
+	nni_pipe   *pipe = p->pipe;
 	size_t      len;
-	nni_aio *   a;
+	nni_aio    *a;
 
 	if (nni_aio_result(&p->aio_recv) != 0) {
 		nni_pipe_close(p->pipe);
@@ -358,7 +356,7 @@ pair1_pipe_recv_cb(void *arg)
 
 	// maybe we have room in the rmq?
 	if (!nni_lmq_full(&s->rmq)) {
-		nni_lmq_putq(&s->rmq, msg);
+		nni_lmq_put(&s->rmq, msg);
 		nni_aio_set_msg(&p->aio_recv, NULL);
 		nni_pipe_recv(pipe, &p->aio_recv);
 	} else {
@@ -372,8 +370,8 @@ static void
 pair1_send_sched(pair1_sock *s)
 {
 	pair1_pipe *p;
-	nni_msg *   m;
-	nni_aio *   a = NULL;
+	nni_msg    *m;
+	nni_aio    *a = NULL;
 	size_t      l = 0;
 
 	nni_mtx_lock(&s->mtx);
@@ -386,14 +384,14 @@ pair1_send_sched(pair1_sock *s)
 	s->wr_ready = true;
 
 	// if message waiting in buffered queue, then we prefer that.
-	if (nni_lmq_getq(&s->wmq, &m) == 0) {
+	if (nni_lmq_get(&s->wmq, &m) == 0) {
 		pair1_pipe_send(p, m);
 
 		if ((a = nni_list_first(&s->waq)) != NULL) {
 			nni_aio_list_remove(a);
 			m = nni_aio_get_msg(a);
 			l = nni_msg_len(m);
-			nni_lmq_putq(&s->wmq, m);
+			nni_lmq_put(&s->wmq, m);
 		}
 
 	} else if ((a = nni_list_first(&s->waq)) != NULL) {
@@ -444,16 +442,16 @@ static void
 pair1_sock_close(void *arg)
 {
 	pair1_sock *s = arg;
-	nni_aio *   a;
-	nni_msg *   m;
+	nni_aio    *a;
+	nni_msg    *m;
 	nni_mtx_lock(&s->mtx);
 	while (((a = nni_list_first(&s->raq)) != NULL) ||
 	    ((a = nni_list_first(&s->waq)) != NULL)) {
 		nni_aio_list_remove(a);
 		nni_aio_finish_error(a, NNG_ECLOSED);
 	}
-	while ((nni_lmq_getq(&s->rmq, &m) == 0) ||
-	    (nni_lmq_getq(&s->wmq, &m) == 0)) {
+	while ((nni_lmq_get(&s->rmq, &m) == 0) ||
+	    (nni_lmq_get(&s->wmq, &m) == 0)) {
 		nni_msg_free(m);
 	}
 	nni_mtx_unlock(&s->mtx);
@@ -521,7 +519,7 @@ static void
 pair1_sock_send(void *arg, nni_aio *aio)
 {
 	pair1_sock *s = arg;
-	nni_msg *   m;
+	nni_msg    *m;
 	size_t      len;
 	int         rv;
 
@@ -540,7 +538,7 @@ pair1_sock_send(void *arg, nni_aio *aio)
 #endif
 
 	// Raw mode messages have the header already formed, with a hop count.
-	// Cooked mode messages have no header so we have to add one.
+	// Cooked mode messages have no header, so we have to add one.
 	if (s->raw) {
 		if ((nni_msg_header_len(m) != sizeof(uint32_t)) ||
 		    (nni_msg_header_peek_u32(m) >= 0xff)) {
@@ -551,7 +549,7 @@ pair1_sock_send(void *arg, nni_aio *aio)
 
 	} else {
 		// Strip off any previously existing header, such as when
-		// replying to messages.
+		// replying to a message.
 		nni_msg_header_clear(m);
 		nni_msg_header_append_u32(m, 0);
 	}
@@ -573,8 +571,8 @@ inject:
 		return;
 	}
 
-	// Can we maybe queue it.
-	if (nni_lmq_putq(&s->wmq, m) == 0) {
+	// Can we queue it?
+	if (nni_lmq_put(&s->wmq, m) == 0) {
 		// Yay, we can.  So we're done.
 		nni_aio_set_msg(aio, NULL);
 		nni_aio_finish(aio, 0, len);
@@ -599,7 +597,7 @@ pair1_sock_recv(void *arg, nni_aio *aio)
 {
 	pair1_sock *s = arg;
 	pair1_pipe *p;
-	nni_msg *   m;
+	nni_msg    *m;
 	int         rv;
 
 	if (nni_aio_begin(aio) != 0) {
@@ -611,14 +609,14 @@ pair1_sock_recv(void *arg, nni_aio *aio)
 
 	// Buffered read.  If there is a message waiting for us, pick
 	// it up.  We might need to post another read request as well.
-	if (nni_lmq_getq(&s->rmq, &m) == 0) {
+	if (nni_lmq_get(&s->rmq, &m) == 0) {
 		nni_aio_set_msg(aio, m);
 		nni_aio_finish(aio, 0, nni_msg_len(m));
 		if (s->rd_ready) {
 			s->rd_ready = false;
 			m           = nni_aio_get_msg(&p->aio_recv);
 			nni_aio_set_msg(&p->aio_recv, NULL);
-			nni_lmq_putq(&s->rmq, m);
+			nni_lmq_put(&s->rmq, m);
 			nni_pipe_recv(p->pipe, &p->aio_recv);
 		}
 		if (nni_lmq_empty(&s->rmq)) {
@@ -678,7 +676,7 @@ pair1_get_send_buf_len(void *arg, void *buf, size_t *szp, nni_opt_type t)
 	int         val;
 
 	nni_mtx_lock(&s->mtx);
-	val = nni_lmq_cap(&s->wmq);
+	val = (int) nni_lmq_cap(&s->wmq);
 	nni_mtx_unlock(&s->mtx);
 
 	return (nni_copyout_int(val, buf, szp, t));
@@ -713,7 +711,7 @@ pair1_get_recv_buf_len(void *arg, void *buf, size_t *szp, nni_opt_type t)
 	int         val;
 
 	nni_mtx_lock(&s->mtx);
-	val = nni_lmq_cap(&s->rmq);
+	val = (int) nni_lmq_cap(&s->rmq);
 	nni_mtx_unlock(&s->mtx);
 
 	return (nni_copyout_int(val, buf, szp, t));

@@ -52,7 +52,7 @@ struct nni_proto_pipe_ops {
 	// pipe_stop is called during finalization, to ensure that
 	// the protocol is absolutely finished with the pipe.  It should
 	// wait if necessary to ensure that the pipe is not referenced
-	// anymore by the protocol.  It should not destroy resources.
+	// any more by the protocol.  It should not destroy resources.
 	void (*pipe_stop)(void *);
 };
 
@@ -63,7 +63,7 @@ struct nni_proto_ctx_ops {
 
 	// ctx_init initializes a new context. The second argument is the
 	// protocol specific socket structure.
-	int (*ctx_init)(void *, void *);
+	void (*ctx_init)(void *, void *);
 
 	// ctx_fini destroys a context.
 	void (*ctx_fini)(void *);
@@ -85,7 +85,7 @@ struct nni_proto_sock_ops {
 
 	// sock_init initializes the protocol instance, which will be stored
 	// on the socket. This is run without the sock lock held.
-	int (*sock_init)(void *, nni_sock *);
+	void (*sock_init)(void *, nni_sock *);
 
 	// sock_fini destroys the protocol instance.  This is run without the
 	// socket lock held, and is intended to release resources.  It may
@@ -125,15 +125,6 @@ struct nni_proto {
 	const nni_proto_sock_ops *proto_sock_ops; // Per-socket operations
 	const nni_proto_pipe_ops *proto_pipe_ops; // Per-pipe operations
 	const nni_proto_ctx_ops * proto_ctx_ops;  // Context operations
-
-	// proto_init, if not NULL, provides a function that initializes
-	// global values.  The main purpose of this may be to initialize
-	// protocol option values.
-	int (*proto_init)(void);
-
-	// proto_fini, if not NULL, is called at shutdown, to release
-	// any resources allocated at proto_init time.
-	void (*proto_fini)(void);
 };
 
 // We quite intentionally use a signature where the upper word is nonzero,
@@ -144,8 +135,8 @@ struct nni_proto {
 // during the life of the project.  If we add a new version, please keep
 // the old version around -- it may be possible to automatically convert
 // older versions in the future.
-#define NNI_PROTOCOL_V2 0x50520002u // "pr\0\2"
-#define NNI_PROTOCOL_VERSION NNI_PROTOCOL_V2
+#define NNI_PROTOCOL_V3 0x50520003u // "pr\0\3"
+#define NNI_PROTOCOL_VERSION NNI_PROTOCOL_V3
 
 // These flags determine which operations make sense.  We use them so that
 // we can reject attempts to create notification fds for operations that make
@@ -193,8 +184,5 @@ extern int nni_proto_open(nng_socket *, const nni_proto *);
 // BUSv0         7   0  bus
 // STARv0      100   0  star       mangos only, experimental
 //
-
-extern int  nni_proto_sys_init(void);
-extern void nni_proto_sys_fini(void);
 
 #endif // CORE_PROTOCOL_H

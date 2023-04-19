@@ -21,25 +21,8 @@ static void listener_accept_start(nni_listener *);
 static void listener_accept_cb(void *);
 static void listener_timer_cb(void *);
 
-static nni_id_map listeners;
-static nni_mtx    listeners_lk;
-
-int
-nni_listener_sys_init(void)
-{
-	nni_id_map_init(&listeners, 1, 0x7fffffff, false);
-	nni_mtx_init(&listeners_lk);
-
-	return (0);
-}
-
-void
-nni_listener_sys_fini(void)
-{
-	nni_reap_drain();
-	nni_mtx_fini(&listeners_lk);
-	nni_id_map_fini(&listeners);
-}
+static nni_id_map listeners = NNI_ID_MAP_INITIALIZER(1, 0x7fffffff, 0);
+static nni_mtx    listeners_lk = NNI_MTX_INITIALIZER;
 
 uint32_t
 nni_listener_id(nni_listener *l)
@@ -50,9 +33,7 @@ nni_listener_id(nni_listener *l)
 void
 nni_listener_destroy(nni_listener *l)
 {
-	nni_aio_stop(&l->l_acc_aio);
-	nni_aio_stop(&l->l_tmo_aio);
-
+	// NB: both these will have already been stopped.
 	nni_aio_fini(&l->l_acc_aio);
 	nni_aio_fini(&l->l_tmo_aio);
 
@@ -216,13 +197,18 @@ nni_listener_bump_error(nni_listener *l, int err)
 #endif
 }
 
+// nni_listener_create creates a listener on the socket.
+// The caller should have a hold on the socket, and on success
+// the listener inherits the callers hold.  (If the caller wants
+// an additional hold, it should get an extra hold before calling this
+// function.)
 int
 nni_listener_create(nni_listener **lp, nni_sock *s, const char *url_str)
 {
-	nni_sp_tran *    tran;
+	nni_sp_tran  *tran;
 	nni_listener *l;
 	int           rv;
-	nni_url *     url;
+	nni_url      *url;
 
 	if ((rv = nni_url_parse(&url, url_str)) != 0) {
 		return (rv);
@@ -239,7 +225,6 @@ nni_listener_create(nni_listener **lp, nni_sock *s, const char *url_str)
 	}
 	l->l_url     = url;
 	l->l_closed  = false;
-	l->l_closing = false;
 	l->l_data    = NULL;
 	l->l_ref     = 1;
 	l->l_sock    = s;
@@ -344,24 +329,7 @@ nni_listener_close(nni_listener *l)
 
 	nni_listener_shutdown(l);
 
-	nni_listener_rele(l); // This will trigger a reap if id count is zero.
-}
-
-void
-nni_listener_close_rele(nni_listener *l)
-{
-	// Listener should already be shutdown.  The socket lock may be held.
-	nni_mtx_lock(&listeners_lk);
-	if (l->l_closed) {
-		nni_mtx_unlock(&listeners_lk);
-		nni_listener_rele(l);
-		return;
-	}
-	l->l_closed = true;
-	nni_id_remove(&listeners, l->l_id);
-	nni_mtx_unlock(&listeners_lk);
-
-	nni_listener_rele(l); // This will trigger a reap if id count is zero.
+	nni_listener_rele(l); // This will reap if reference count is zero.
 }
 
 static void
@@ -378,7 +346,7 @@ static void
 listener_accept_cb(void *arg)
 {
 	nni_listener *l   = arg;
-	nni_aio *     aio = &l->l_acc_aio;
+	nni_aio      *aio = &l->l_acc_aio;
 	int           rv;
 
 	switch ((rv = nni_aio_result(aio))) {
@@ -438,6 +406,14 @@ nni_listener_start(nni_listener *l, int flags)
 	listener_accept_start(l);
 
 	return (0);
+}
+
+void
+nni_listener_stop(nni_listener *l)
+{
+	nni_aio_stop(&l->l_tmo_aio);
+	nni_aio_stop(&l->l_acc_aio);
+	l->l_ops.l_close(l->l_data);
 }
 
 nni_sock *

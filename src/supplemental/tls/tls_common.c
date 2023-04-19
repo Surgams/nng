@@ -1,5 +1,5 @@
 //
-// Copyright 2020 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 // Copyright 2019 Devolutions <info@devolutions.net>
 //
@@ -39,8 +39,7 @@
 
 #ifdef NNG_SUPP_TLS
 
-static const nng_tls_engine *tls_engine;
-static nni_mtx               tls_engine_lock;
+static nni_atomic_ptr tls_engine;
 
 struct nng_tls_config {
 	nng_tls_engine_config_ops ops;
@@ -757,10 +756,50 @@ tls_get_verified(void *arg, void *buf, size_t *szp, nni_type t)
 	return (nni_copyout_bool(v, buf, szp, t));
 }
 
+static int
+tls_get_peer_cn(void *arg, void *buf, size_t *szp, nni_type t)
+{
+	NNI_ARG_UNUSED(szp);
+
+	if (t != NNI_TYPE_STRING) {
+		return (NNG_EBADTYPE);
+	}
+
+	tls_conn *conn = arg;
+	nni_mtx_lock(&conn->lock);
+	*(char **) buf = conn->ops.peer_cn((void *) (conn + 1));
+	nni_mtx_unlock(&conn->lock);
+	return (0);
+}
+
+static int
+tls_get_peer_alt_names(void *arg, void *buf, size_t *szp, nni_type t)
+{
+	NNI_ARG_UNUSED(szp);
+
+	if (t != NNI_TYPE_POINTER) {
+		return (NNG_EBADTYPE);
+	}
+
+	tls_conn *conn = arg;
+	nni_mtx_lock(&conn->lock);
+	*(char ***) buf = conn->ops.peer_alt_names((void *) (conn + 1));
+	nni_mtx_unlock(&conn->lock);
+	return (0);
+}
+
 static const nni_option tls_options[] = {
 	{
 	    .o_name = NNG_OPT_TLS_VERIFIED,
 	    .o_get  = tls_get_verified,
+	},
+	{
+	    .o_name = NNG_OPT_TLS_PEER_CN,
+	    .o_get  = tls_get_peer_cn,
+	},
+	{
+	    .o_name = NNG_OPT_TLS_PEER_ALT_NAMES,
+	    .o_get  = tls_get_peer_alt_names,
 	},
 	{
 	    .o_name = NULL,
@@ -1366,15 +1405,13 @@ nng_tls_config_alloc(nng_tls_config **cfg_p, nng_tls_mode mode)
 		return (rv);
 	}
 
-	nni_mtx_lock(&tls_engine_lock);
-	eng = tls_engine;
-	nni_mtx_unlock(&tls_engine_lock);
+	eng = nni_atomic_get_ptr(&tls_engine);
 
 	if (eng == NULL) {
 		return (NNG_ENOTSUP);
 	}
 
-	size = NNI_ALIGN_UP(sizeof(*cfg) + eng->config_ops->size);
+	size = NNI_ALIGN_UP(sizeof(*cfg)) + eng->config_ops->size;
 
 	if ((cfg = nni_zalloc(size)) == NULL) {
 		return (NNG_ENOMEM);
@@ -1424,9 +1461,8 @@ nng_tls_engine_name(void)
 	const nng_tls_engine *eng;
 
 	nni_init();
-	nni_mtx_lock(&tls_engine_lock);
-	eng = tls_engine;
-	nni_mtx_unlock(&tls_engine_lock);
+
+	eng = nni_atomic_get_ptr(&tls_engine);
 
 	return (eng == NULL ? "none" : eng->name);
 }
@@ -1437,9 +1473,8 @@ nng_tls_engine_description(void)
 	const nng_tls_engine *eng;
 
 	nni_init();
-	nni_mtx_lock(&tls_engine_lock);
-	eng = tls_engine;
-	nni_mtx_unlock(&tls_engine_lock);
+
+	eng = nni_atomic_get_ptr(&tls_engine);
 
 	return (eng == NULL ? "" : eng->description);
 }
@@ -1450,9 +1485,8 @@ nng_tls_engine_fips_mode(void)
 	const nng_tls_engine *eng;
 
 	nni_init();
-	nni_mtx_lock(&tls_engine_lock);
-	eng = tls_engine;
-	nni_mtx_unlock(&tls_engine_lock);
+
+	eng = nni_atomic_get_ptr(&tls_engine);
 
 	return (eng == NULL ? false : eng->fips_mode);
 }
@@ -1463,9 +1497,7 @@ nng_tls_engine_register(const nng_tls_engine *engine)
 	if (engine->version != NNG_TLS_ENGINE_VERSION) {
 		return (NNG_ENOTSUP);
 	}
-	nni_mtx_lock(&tls_engine_lock);
-	tls_engine = engine;
-	nni_mtx_unlock(&tls_engine_lock);
+	nni_atomic_set_ptr(&tls_engine, (void *)engine);
 	return (0);
 }
 
@@ -1492,12 +1524,9 @@ int
 nni_tls_sys_init(void)
 {
 	int rv;
-	nni_mtx_init(&tls_engine_lock);
-	tls_engine = NULL;
 
 	rv = NNG_TLS_ENGINE_INIT();
 	if (rv != 0) {
-		nni_mtx_fini(&tls_engine_lock);
 		return (rv);
 	}
 	return (0);
@@ -1506,7 +1535,6 @@ nni_tls_sys_init(void)
 void
 nni_tls_sys_fini(void)
 {
-	nni_reap_drain();
 	NNG_TLS_ENGINE_FINI();
 }
 

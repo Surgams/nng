@@ -1,5 +1,5 @@
 //
-// Copyright 2019 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2022 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -45,8 +45,8 @@ unsigned trantest_port = 0;
 
 extern int  notransport(void);
 extern void trantest_checktran(const char *url);
-extern void trantest_next_address(char *out, const char *template);
-extern void trantest_prev_address(char *out, const char *template);
+extern void trantest_next_address(char *out, const char *prefix);
+extern void trantest_prev_address(char *out, const char *prefix);
 extern void trantest_init(trantest *tt, const char *addr);
 extern int  trantest_dial(trantest *tt, nng_dialer *dp);
 extern int  trantest_listen(trantest *tt, nng_listener *lp);
@@ -87,9 +87,9 @@ trantest_checktran(const char *url)
 }
 
 void
-trantest_next_address(char *out, const char *template)
+trantest_next_address(char *out, const char *prefix)
 {
-	trantest_checktran(template);
+	trantest_checktran(prefix);
 
 	if (trantest_port == 0) {
 		char *pstr;
@@ -102,15 +102,18 @@ trantest_next_address(char *out, const char *template)
 			trantest_port = atoi(pstr);
 		}
 	}
-	(void) snprintf(out, NNG_MAXADDRLEN, template, trantest_port);
+
+	// we append the port, and for web sockets also a /test path
+	(void) snprintf(out, NNG_MAXADDRLEN, "%s%u%s", prefix, trantest_port,
+		prefix[0] == 'w' ? "/test" : "");
 	trantest_port++;
 }
 
 void
-trantest_prev_address(char *out, const char *template)
+trantest_prev_address(char *out, const char *prefix)
 {
 	trantest_port--;
-	trantest_next_address(out, template);
+	trantest_next_address(out, prefix);
 }
 
 void
@@ -232,7 +235,7 @@ trantest_listen_accept(trantest *tt)
 		So(trantest_listen(tt, &l) == 0);
 		So(nng_listener_id(l) > 0);
 
-		nng_msleep(200);
+		nng_msleep(500);
 		So(trantest_dial(tt, &d) == 0);
 		So(nng_dialer_id(d) > 0);
 		So(nng_dialer_id(d0) < 0);
@@ -282,7 +285,7 @@ trantest_send_recv(trantest *tt)
 		So(strcmp(nng_msg_body(recv), "acknowledge") == 0);
 		p = nng_msg_get_pipe(recv);
 		So(nng_pipe_id(p) > 0);
-		So(nng_pipe_getopt_string(p, NNG_OPT_URL, &url) == 0);
+		So(nng_pipe_get_string(p, NNG_OPT_URL, &url) == 0);
 		So(strcmp(url, tt->addr) == 0);
 		nng_strfree(url);
 		nng_msg_free(recv);
@@ -336,7 +339,7 @@ trantest_send_recv_multi(trantest *tt)
 			So(strcmp(nng_msg_body(recv), msgbuf) == 0);
 			p = nng_msg_get_pipe(recv);
 			So(nng_pipe_id(p) > 0);
-			So(nng_pipe_getopt_string(p, NNG_OPT_URL, &url) == 0);
+			So(nng_pipe_get_string(p, NNG_OPT_URL, &url) == 0);
 			So(strcmp(url, tt->addr) == 0);
 			nng_strfree(url);
 			nng_msg_free(recv);

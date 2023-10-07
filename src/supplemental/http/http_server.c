@@ -1,5 +1,5 @@
 //
-// Copyright 2022 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2023 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 // Copyright 2018 QXSoftware <lh563566994@126.com>
 // Copyright 2019 Devolutions <info@devolutions.net>
@@ -272,7 +272,7 @@ nni_http_handler_set_method(nni_http_handler *h, const char *method)
 
 static nni_list http_servers =
     NNI_LIST_INITIALIZER(http_servers, nni_http_server, node);
-static nni_mtx  http_servers_lk = NNI_MTX_INITIALIZER;
+static nni_mtx http_servers_lk = NNI_MTX_INITIALIZER;
 
 static void
 http_sc_reap(void *arg)
@@ -486,6 +486,7 @@ http_sconn_error(http_sconn *sc, uint16_t err)
 		if (nni_http_res_set_header(res, "Connection", "close") != 0) {
 			nni_http_res_free(res);
 			http_sconn_close(sc);
+			return;
 		}
 	}
 	sc->res = res;
@@ -1155,7 +1156,7 @@ nni_http_server_res_error(nni_http_server *s, nni_http_res *res)
 	http_error *epage;
 	char *      body = NULL;
 	char *      html = NULL;
-	size_t      len = 0;
+	size_t      len  = 0;
 	uint16_t    code = nni_http_res_get_status(res);
 	int         rv;
 
@@ -1549,7 +1550,10 @@ http_handle_dir(nni_aio *aio)
 	}
 
 	for (uri = uri + len; *uri != '\0'; uri++) {
-		if (*uri == '/') {
+		if (*uri == '?') {
+			// Skip URI parameters
+			break;
+		} else if (*uri == '/') {
 			strcpy(dst, NNG_PLATFORM_DIR_SEP);
 			dst += sizeof(NNG_PLATFORM_DIR_SEP) - 1;
 		} else {

@@ -1,5 +1,5 @@
 //
-// Copyright 2022 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2023 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -41,7 +41,7 @@ static int                nni_aio_expire_q_cnt;
 // condition variable, and expiration thread.  By default, this is one
 // per CPU core present -- the goal being to reduce overall pressure
 // caused by a single lock.  The number of queues (and threads) can
-// be tuned using the NNG_EXPIRE_THREADS tunable.
+// be tuned using the NNG_NUM_EXPIRE_THREADS tunable.
 //
 // We will not permit an AIO
 // to be marked done if an expiration is outstanding.
@@ -795,15 +795,16 @@ nni_aio_sys_init(void)
 {
 	int num_thr;
 
-	// We create a thread per CPU core for expiration by default.
-#ifndef NNG_EXPIRE_THREADS
+#ifndef NNG_NUM_EXPIRE_THREADS
 	num_thr = nni_plat_ncpu();
 #else
-	num_thr = NNG_EXPIRE_THREADS;
+	num_thr = NNG_NUM_EXPIRE_THREADS;
 #endif
-	if (num_thr > 256) {
-		num_thr = 256;
+#if NNG_MAX_EXPIRE_THREADS > 0
+	if (num_thr > NNG_MAX_EXPIRE_THREADS) {
+		num_thr = NNG_MAX_EXPIRE_THREADS;
 	}
+#endif
 
 	nni_aio_expire_q_list =
 	    nni_zalloc(sizeof(nni_aio_expire_q *) * num_thr);

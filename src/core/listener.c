@@ -1,5 +1,5 @@
 //
-// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2023 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 // Copyright 2018 Devolutions <info@devolutions.net>
 //
@@ -306,6 +306,7 @@ nni_listener_rele(nni_listener *l)
 	bool reap;
 
 	nni_mtx_lock(&listeners_lk);
+	NNI_ASSERT(l->l_ref > 0);
 	l->l_ref--;
 	reap = ((l->l_ref == 0) && (l->l_closed));
 	nni_mtx_unlock(&listeners_lk);
@@ -329,6 +330,7 @@ nni_listener_close(nni_listener *l)
 
 	nni_listener_shutdown(l);
 
+	nni_sock_remove_listener(l);
 	nni_listener_rele(l); // This will reap if reference count is zero.
 }
 

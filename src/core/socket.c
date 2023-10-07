@@ -1,5 +1,5 @@
 //
-// Copyright 2022 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2023 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -9,6 +9,7 @@
 //
 
 #include "core/nng_impl.h"
+#include "list.h"
 #include "sockimpl.h"
 
 #include <stdio.h>
@@ -640,8 +641,10 @@ nni_sock_open(nni_sock **sockp, const nni_proto *proto)
 	}
 
 	nni_mtx_lock(&sock_lk);
-	if (nni_id_alloc(&sock_ids, &s->s_id, s) != 0) {
+	if ((rv = nni_id_alloc(&sock_ids, &s->s_id, s)) != 0) {
+		nni_mtx_unlock(&sock_lk);
 		sock_destroy(s);
+		return (rv);
 	} else {
 		nni_list_append(&sock_list, s);
 		s->s_sock_ops.sock_open(s->s_data);
@@ -689,7 +692,6 @@ nni_sock_shutdown(nni_sock *sock)
 
 	while ((l = nni_list_first(&sock->s_listeners)) != NULL) {
 		nni_listener_hold(l);
-		nni_list_node_remove(&l->l_node);
 		nni_mtx_unlock(&sock->s_mx);
 		nni_listener_close(l);
 		nni_mtx_lock(&sock->s_mx);
@@ -697,7 +699,6 @@ nni_sock_shutdown(nni_sock *sock)
 
 	while ((d = nni_list_first(&sock->s_dialers)) != NULL) {
 		nni_dialer_hold(d);
-		nni_list_node_remove(&d->d_node);
 		nni_mtx_unlock(&sock->s_mx);
 		nni_dialer_close(d);
 		nni_mtx_lock(&sock->s_mx);
@@ -888,10 +889,17 @@ int
 nni_sock_add_listener(nni_sock *s, nni_listener *l)
 {
 	nni_sockopt *sopt;
+	int          rv;
+
+	// grab a hold on the listener for the socket
+	if ((rv = nni_listener_hold(l)) != 0) {
+		return (rv);
+	}
 
 	nni_mtx_lock(&s->s_mx);
 	if (s->s_closing) {
 		nni_mtx_unlock(&s->s_mx);
+		nni_listener_rele(l);
 		return (NNG_ECLOSED);
 	}
 
@@ -915,14 +923,34 @@ nni_sock_add_listener(nni_sock *s, nni_listener *l)
 	return (0);
 }
 
+void
+nni_sock_remove_listener(nni_listener *l)
+{
+	nni_sock *s = l->l_sock;
+	nni_mtx_lock(&s->s_mx);
+	NNI_ASSERT(nni_list_node_active(&l->l_node));
+	nni_list_node_remove(&l->l_node);
+	nni_mtx_unlock(&s->s_mx);
+
+	// also drop the hold from the socket
+	nni_listener_rele(l);
+}
+
 int
 nni_sock_add_dialer(nni_sock *s, nni_dialer *d)
 {
 	nni_sockopt *sopt;
+	int rv;
+
+	// grab a hold on the dialer for the socket
+	if ((rv = nni_dialer_hold(d)) != 0) {
+		return (rv);
+	}
 
 	nni_mtx_lock(&s->s_mx);
 	if (s->s_closing) {
 		nni_mtx_unlock(&s->s_mx);
+		nni_dialer_rele(d);
 		return (NNG_ECLOSED);
 	}
 
@@ -944,6 +972,19 @@ nni_sock_add_dialer(nni_sock *s, nni_dialer *d)
 
 	nni_mtx_unlock(&s->s_mx);
 	return (0);
+}
+
+void
+nni_sock_remove_dialer(nni_dialer *d)
+{
+	nni_sock *s = d->d_sock;
+	nni_mtx_lock(&s->s_mx);
+	NNI_ASSERT(nni_list_node_active(&d->d_node));
+	nni_list_node_remove(&d->d_node);
+	nni_mtx_unlock(&s->s_mx);
+
+	// also drop the hold from the socket
+	nni_dialer_rele(d);
 }
 
 int
@@ -1519,7 +1560,6 @@ nni_dialer_shutdown(nni_dialer *d)
 	NNI_LIST_FOREACH (&d->d_pipes, p) {
 		nni_pipe_close(p);
 	}
-	nni_list_node_remove(&d->d_node);
 	nni_mtx_unlock(&s->s_mx);
 }
 
@@ -1552,8 +1592,6 @@ dialer_reap(void *arg)
 		nni_dialer_reap(d);
 		return;
 	}
-
-	nni_list_node_remove(&d->d_node);
 
 	nni_mtx_unlock(&s->s_mx);
 

@@ -1,5 +1,5 @@
 //
-// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2024 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -11,6 +11,7 @@
 #include <stdlib.h>
 
 #include "core/nng_impl.h"
+#include "core/pipe.h"
 #include "nng/protocol/pair0/pair.h"
 
 // Pair protocol.  The PAIR protocol is a simple 1:1 messaging pattern.
@@ -157,12 +158,18 @@ pair0_pipe_start(void *arg)
 
 	if (nni_pipe_peer(p->pipe) != NNI_PROTO_PAIR_V0) {
 		// Peer protocol mismatch.
+		nng_log_warn("NNG-PEER-MISMATCH",
+		    "Peer protocol mismatch: %d != %d, rejected.",
+		    nni_pipe_peer(p->pipe), NNI_PROTO_PAIR_V0);
 		return (NNG_EPROTO);
 	}
 
 	nni_mtx_lock(&s->mtx);
 	if (s->p != NULL) {
 		nni_mtx_unlock(&s->mtx);
+		nng_log_warn("NNG-PAIR-BUSY",
+		    "Peer pipe protocol %d is already paired, rejected.",
+		    nni_pipe_peer(p->pipe));
 		return (NNG_EBUSY); // Already have a peer, denied.
 	}
 	s->p        = p;
@@ -506,40 +513,22 @@ pair0_get_recv_buf_len(void *arg, void *buf, size_t *szp, nni_opt_type t)
 }
 
 static int
-pair0_sock_get_recv_fd(void *arg, void *buf, size_t *szp, nni_opt_type t)
+pair0_sock_get_recv_fd(void *arg, int *fdp)
 {
 	pair0_sock *s = arg;
-	int         rv;
-	int         fd;
 
-	if ((rv = nni_pollable_getfd(&s->readable, &fd)) != 0) {
-		return (rv);
-	}
-	return (nni_copyout_int(fd, buf, szp, t));
+	return (nni_pollable_getfd(&s->readable, fdp));
 }
 
 static int
-pair0_sock_get_send_fd(void *arg, void *buf, size_t *szp, nni_opt_type t)
+pair0_sock_get_send_fd(void *arg, int *fdp)
 {
 	pair0_sock *s = arg;
-	int         rv;
-	int         fd;
 
-	if ((rv = nni_pollable_getfd(&s->writable, &fd)) != 0) {
-		return (rv);
-	}
-	return (nni_copyout_int(fd, buf, szp, t));
+	return (nni_pollable_getfd(&s->writable, fdp));
 }
 
 static nni_option pair0_sock_options[] = {
-	{
-	    .o_name = NNG_OPT_RECVFD,
-	    .o_get  = pair0_sock_get_recv_fd,
-	},
-	{
-	    .o_name = NNG_OPT_SENDFD,
-	    .o_get  = pair0_sock_get_send_fd,
-	},
 	{
 	    .o_name = NNG_OPT_SENDBUF,
 	    .o_get  = pair0_get_send_buf_len,
@@ -566,14 +555,16 @@ static nni_proto_pipe_ops pair0_pipe_ops = {
 };
 
 static nni_proto_sock_ops pair0_sock_ops = {
-	.sock_size    = sizeof(pair0_sock),
-	.sock_init    = pair0_sock_init,
-	.sock_fini    = pair0_sock_fini,
-	.sock_open    = pair0_sock_open,
-	.sock_close   = pair0_sock_close,
-	.sock_send    = pair0_sock_send,
-	.sock_recv    = pair0_sock_recv,
-	.sock_options = pair0_sock_options,
+	.sock_size         = sizeof(pair0_sock),
+	.sock_init         = pair0_sock_init,
+	.sock_fini         = pair0_sock_fini,
+	.sock_open         = pair0_sock_open,
+	.sock_close        = pair0_sock_close,
+	.sock_send         = pair0_sock_send,
+	.sock_recv         = pair0_sock_recv,
+	.sock_recv_poll_fd = pair0_sock_get_recv_fd,
+	.sock_send_poll_fd = pair0_sock_get_send_fd,
+	.sock_options      = pair0_sock_options,
 };
 
 // Legacy protocol (v0)

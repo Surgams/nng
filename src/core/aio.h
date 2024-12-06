@@ -1,5 +1,5 @@
 //
-// Copyright 2022 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2023 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -149,10 +149,12 @@ extern size_t nni_aio_iov_count(nni_aio *);
 
 extern int nni_aio_set_iov(nni_aio *, unsigned, const nni_iov *);
 
-extern void nni_aio_set_timeout(nni_aio *, nng_duration);
-extern void nni_aio_get_iov(nni_aio *, unsigned *, nni_iov **);
-extern void nni_aio_normalize_timeout(nni_aio *, nng_duration);
-extern void nni_aio_bump_count(nni_aio *, size_t);
+extern void         nni_aio_set_timeout(nni_aio *, nng_duration);
+extern void         nni_aio_set_expire(nni_aio *, nni_time);
+extern nng_duration nni_aio_get_timeout(nni_aio *);
+extern void         nni_aio_get_iov(nni_aio *, unsigned *, nni_iov **);
+extern void         nni_aio_normalize_timeout(nni_aio *, nng_duration);
+extern void         nni_aio_bump_count(nni_aio *, size_t);
 
 // nni_aio_schedule indicates that the AIO has begun, and is scheduled for
 // asynchronous completion. This also starts the expiration timer. Note that
@@ -166,7 +168,31 @@ extern int nni_aio_schedule(nni_aio *, nni_aio_cancel_fn, void *);
 
 extern void nni_sleep_aio(nni_duration, nni_aio *);
 
-extern int  nni_aio_sys_init(void);
+// nni_aio_completion_list is used after removing the aio from an
+// active work queue, and keeping them so that the completions can
+// be run in a deferred manner.  These lists are simple, and intended
+// to be used as local variables.  It's important to initialize the
+// list before using it.  Also, any AIO added to a completion list must
+// not be in active use anywhere.
+typedef void *nni_aio_completions;
+
+// nni_aio_completions_init just initializes a completions list.
+// This just sets the pointed value to NULL.
+extern void nni_aio_completions_init(nni_aio_completions *);
+
+// nni_aio_completions_run runs nni_aio_finish_sync for all the aio objects
+// that have been added to the completions.  The result code and count used
+// are those supplied in nni_aio_completions_add.  Callers should not hold
+// locks when calling this.
+extern void nni_aio_completions_run(nni_aio_completions *);
+
+// nni_aio_completions_add adds an aio (with the result code and length as
+// appropriate) to the completion list.  This should be done while the
+// appropriate lock is held.  The aio must not be scheduled.
+extern void nni_aio_completions_add(
+    nni_aio_completions *, nni_aio *, int, size_t);
+
+extern int  nni_aio_sys_init(nng_init_params *);
 extern void nni_aio_sys_fini(void);
 
 typedef struct nni_aio_expire_q nni_aio_expire_q;
@@ -178,14 +204,15 @@ typedef struct nni_aio_expire_q nni_aio_expire_q;
 // any of these members -- the definition is provided here to facilitate
 // inlining, but that should be the only use.
 struct nng_aio {
-	size_t       a_count;     // Bytes transferred (I/O only)
-	nni_time     a_expire;    // Absolute timeout
-	nni_duration a_timeout;   // Relative timeout
-	int          a_result;    // Result code (nng_errno)
-	bool         a_stop;      // Shutting down (no new operations)
-	bool         a_sleep;     // Sleeping with no action
-	bool         a_expire_ok; // Expire from sleep is ok
-	bool         a_expiring;  // Expiration in progress
+	size_t       a_count;      // Bytes transferred (I/O only)
+	nni_time     a_expire;     // Absolute timeout
+	nni_duration a_timeout;    // Relative timeout
+	int          a_result;     // Result code (nng_errno)
+	bool         a_stop;       // Shutting down (no new operations)
+	bool         a_sleep;      // Sleeping with no action
+	bool         a_expire_ok;  // Expire from sleep is ok
+	bool         a_expiring;   // Expiration in progress
+	bool         a_use_expire; // Use expire instead of timeout
 	nni_task     a_task;
 
 	// Read/write operations.
@@ -203,8 +230,8 @@ struct nng_aio {
 
 	// Provider-use fields.
 	nni_aio_cancel_fn a_cancel_fn;
-	void	     *a_cancel_arg;
-	void	     *a_prov_data;
+	void             *a_cancel_arg;
+	void             *a_prov_data;
 	nni_list_node     a_prov_node; // Linkage on provider list.
 	nni_aio_expire_q *a_expire_q;
 	nni_list_node     a_expire_node; // Expiration node

@@ -1,5 +1,5 @@
 //
-// Copyright 2019 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2024 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -22,13 +22,13 @@
 // a comma.  From experience, for example, Firefox uses a Connection:
 // header with two values, "keepalive", and "upgrade".
 typedef struct http_header {
-	char *        name;
-	char *        value;
+	char         *name;
+	char         *value;
 	nni_list_node node;
 } http_header;
 
 typedef struct nni_http_entity {
-	char * data;
+	char  *data;
 	size_t size; // allocated/expected size
 	size_t len;  // current length
 	bool   own;  // if true, data is "ours", and should be freed
@@ -37,10 +37,10 @@ typedef struct nni_http_entity {
 struct nng_http_req {
 	nni_list        hdrs;
 	nni_http_entity data;
-	char *          meth;
-	char *          uri;
-	char *          vers;
-	char *          buf;
+	char           *meth;
+	char           *uri;
+	char           *vers;
+	char           *buf;
 	size_t          bufsz;
 	bool            parsed;
 };
@@ -49,9 +49,9 @@ struct nng_http_res {
 	nni_list        hdrs;
 	nni_http_entity data;
 	uint16_t        code;
-	char *          rsn;
-	char *          vers;
-	char *          buf;
+	char           *rsn;
+	char           *vers;
+	char           *buf;
 	size_t          bufsz;
 	bool            parsed;
 	bool            iserr;
@@ -262,7 +262,7 @@ nni_http_res_add_header(nni_http_res *res, const char *key, const char *val)
 }
 
 static const char *
-http_get_header(nni_list *hdrs, const char *key)
+http_get_header(const nni_list *hdrs, const char *key)
 {
 	http_header *h;
 	NNI_LIST_FOREACH (hdrs, h) {
@@ -274,13 +274,13 @@ http_get_header(nni_list *hdrs, const char *key)
 }
 
 const char *
-nni_http_req_get_header(nni_http_req *req, const char *key)
+nni_http_req_get_header(const nni_http_req *req, const char *key)
 {
 	return (http_get_header(&req->hdrs, key));
 }
 
 const char *
-nni_http_res_get_header(nni_http_res *res, const char *key)
+nni_http_res_get_header(const nni_http_res *res, const char *key)
 {
 	return (http_get_header(&res->hdrs, key));
 }
@@ -492,7 +492,7 @@ http_asprintf(char **bufp, size_t *szp, nni_list *hdrs, const char *fmt, ...)
 	va_list ap;
 	size_t  len;
 	size_t  n;
-	char *  buf;
+	char   *buf;
 
 	va_start(ap, fmt);
 	len = vsnprintf(NULL, 0, fmt, ap);
@@ -550,7 +550,7 @@ http_res_prepare(nni_http_res *res)
 char *
 nni_http_req_headers(nni_http_req *req)
 {
-	char * s;
+	char  *s;
 	size_t len;
 
 	len = http_sprintf_headers(NULL, 0, &req->hdrs) + 1;
@@ -563,7 +563,7 @@ nni_http_req_headers(nni_http_req *req)
 char *
 nni_http_res_headers(nni_http_res *res)
 {
-	char * s;
+	char  *s;
 	size_t len;
 
 	len = http_sprintf_headers(NULL, 0, &res->hdrs) + 1;
@@ -600,7 +600,7 @@ nni_http_res_get_buf(nni_http_res *res, void **data, size_t *szp)
 }
 
 int
-nni_http_req_alloc(nni_http_req **reqp, const nni_url *url)
+nni_http_req_alloc(nni_http_req **reqp, const nng_url *url)
 {
 	nni_http_req *req;
 	if ((req = NNI_ALLOC_STRUCT(req)) == NULL) {
@@ -617,19 +617,30 @@ nni_http_req_alloc(nni_http_req **reqp, const nni_url *url)
 	req->uri       = NULL;
 	if (url != NULL) {
 		const char *host;
+		char        host_buf[264]; // 256 + 8 for port
 		int         rv;
-		if ((req->uri = nni_strdup(url->u_requri)) == NULL) {
+		rv = nni_asprintf(&req->uri, "%s%s%s%s%s", url->u_path,
+		    url->u_query ? "?" : "", url->u_query ? url->u_query : "",
+		    url->u_fragment ? "#" : "",
+		    url->u_fragment ? url->u_fragment : "");
+		if (rv != 0) {
 			NNI_FREE_STRUCT(req);
 			return (NNG_ENOMEM);
 		}
 
 		// Add a Host: header since we know that from the URL. Also,
 		// only include the :port portion if it isn't the default port.
-		if (strcmp(nni_url_default_port(url->u_scheme), url->u_port) ==
-		    0) {
+		if (nni_url_default_port(url->u_scheme) == url->u_port) {
 			host = url->u_hostname;
 		} else {
-			host = url->u_host;
+			if (strchr(url->u_hostname, ':')) {
+				snprintf(host_buf, sizeof(host_buf), "[%s]:%u",
+				    url->u_hostname, url->u_port);
+			} else {
+				snprintf(host_buf, sizeof(host_buf), "%s:%u",
+				    url->u_hostname, url->u_port);
+			}
+			host = host_buf;
 		}
 		if ((rv = nni_http_req_add_header(req, "Host", host)) != 0) {
 			nni_http_req_free(req);
@@ -661,25 +672,25 @@ nni_http_res_alloc(nni_http_res **resp)
 }
 
 const char *
-nni_http_req_get_method(nni_http_req *req)
+nni_http_req_get_method(const nni_http_req *req)
 {
 	return (req->meth != NULL ? req->meth : "GET");
 }
 
 const char *
-nni_http_req_get_uri(nni_http_req *req)
+nni_http_req_get_uri(const nni_http_req *req)
 {
 	return (req->uri != NULL ? req->uri : "");
 }
 
 const char *
-nni_http_req_get_version(nni_http_req *req)
+nni_http_req_get_version(const nni_http_req *req)
 {
 	return (req->vers != NULL ? req->vers : "HTTP/1.1");
 }
 
 const char *
-nni_http_res_get_version(nni_http_res *res)
+nni_http_res_get_version(const nni_http_res *res)
 {
 	return (res->vers != NULL ? res->vers : "HTTP/1.1");
 }
@@ -725,7 +736,7 @@ nni_http_res_set_status(nni_http_res *res, uint16_t status)
 }
 
 uint16_t
-nni_http_res_get_status(nni_http_res *res)
+nni_http_res_get_status(const nni_http_res *res)
 {
 	return (res->code);
 }
@@ -735,7 +746,7 @@ http_scan_line(void *vbuf, size_t n, size_t *lenp)
 {
 	size_t len;
 	char   lc;
-	char * buf = vbuf;
+	char  *buf = vbuf;
 
 	lc = 0;
 	for (len = 0; len < n; len++) {
@@ -1000,7 +1011,7 @@ nni_http_reason(uint16_t code)
 }
 
 const char *
-nni_http_res_get_reason(nni_http_res *res)
+nni_http_res_get_reason(const nni_http_res *res)
 {
 	return (res->rsn ? res->rsn : nni_http_reason(res->code));
 }
@@ -1042,7 +1053,7 @@ nni_http_alloc_html_error(char **html, uint16_t code, const char *details)
 int
 nni_http_res_alloc_error(nni_http_res **resp, uint16_t err)
 {
-	char *        html = NULL;
+	char         *html = NULL;
 	nni_http_res *res  = NULL;
 	int           rv;
 

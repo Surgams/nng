@@ -13,8 +13,9 @@
 #define CORE_OPTIONS_H
 
 // Integer limits.
-#define NNI_MAXINT ((int) 2147483647)
-#define NNI_MININT ((int) -2147483648)
+#define NNI_MAXINT (2147483647)
+// the -1 trick works around a compiler warning on some compilers (MSVC)
+#define NNI_MININT (-2147483647 - 1)
 
 // We limit the maximum size to 4GB.  That's intentional because some of the
 // underlying protocols cannot cope with anything bigger than 32-bits.
@@ -30,13 +31,13 @@ extern int nni_copyin_bool(bool *, const void *, size_t, nni_type);
 extern int nni_copyin_int(int *, const void *, size_t, int, int, nni_type);
 extern int nni_copyin_size(
     size_t *, const void *, size_t, size_t, size_t, nni_type);
-extern int nni_copyin_str(char *, const void *, size_t, size_t, nni_type);
+extern int nni_copyin_str(char *, const void *, size_t, nni_type);
 extern int nni_copyin_ptr(void **, const void *, size_t, nni_type);
 extern int nni_copyin_u64(uint64_t *, const void *, size_t, nni_type);
-extern int nni_copyin_sockaddr(nng_sockaddr *, const void *, size_t, nni_type);
+extern int nni_copyin_sockaddr(nng_sockaddr *, const void *, nni_type);
 
 // nni_copyout_xxx copies out a type of the named value.  It assumes that
-// the type is aligned and the size correct, unless NNI_TYPE_OPAQUE is passed.
+// the type is aligned and the size correct.
 extern int nni_copyout(const void *, size_t, void *, size_t *);
 extern int nni_copyout_bool(bool, void *, size_t *, nni_type);
 extern int nni_copyout_int(int, void *, size_t *, nni_type);

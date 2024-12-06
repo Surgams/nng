@@ -1,5 +1,5 @@
 //
-// Copyright 2020 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2024 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -17,7 +17,6 @@
 
 #include <nng/nng.h>
 #include <nng/supplemental/util/options.h>
-#include <nng/supplemental/util/platform.h>
 
 static void die(const char *, ...);
 static int
@@ -190,6 +189,9 @@ main(int argc, char **argv)
 	open_client = nng_pair0_open;
 #endif
 
+	nng_init(NULL);
+	atexit(nng_fini);
+
 	// Allow -m <remote_lat> or whatever to override argv[0].
 	if ((argc >= 3) && (strcmp(argv[1], "-m") == 0)) {
 		prog = argv[2];
@@ -328,13 +330,13 @@ do_inproc(void *args)
 void
 do_inproc_lat(int argc, char **argv)
 {
-	nng_thread *       thr;
+	nng_thread        *thr;
 	struct inproc_args ia;
 	int                rv;
 	int                val;
 	int                optidx;
-	char *             arg;
-	char *             addr;
+	char              *arg;
+	char              *addr;
 
 	addr = "inproc://latency_test";
 
@@ -392,13 +394,13 @@ do_inproc_lat(int argc, char **argv)
 void
 do_inproc_thr(int argc, char **argv)
 {
-	nng_thread *       thr;
+	nng_thread        *thr;
 	struct inproc_args ia;
 	int                rv;
 	int                optidx;
 	int                val;
-	char *             arg;
-	char *             addr = "inproc://throughput-test";
+	char              *arg;
+	char              *addr = "inproc://throughput-test";
 
 	optidx = 0;
 	while ((rv = nng_opts_parse(argc, argv, opts, &val, &arg, &optidx)) ==
@@ -461,7 +463,7 @@ void
 latency_client(const char *addr, size_t msgsize, int trips)
 {
 	nng_socket s;
-	nng_msg *  msg;
+	nng_msg   *msg;
 	nng_time   start, end;
 	int        rv;
 	int        i;
@@ -511,7 +513,7 @@ void
 latency_server(const char *addr, size_t msgsize, int trips)
 {
 	nng_socket s;
-	nng_msg *  msg;
+	nng_msg   *msg;
 	int        rv;
 	int        i;
 
@@ -553,7 +555,7 @@ void
 throughput_server(const char *addr, size_t msgsize, int count)
 {
 	nng_socket s;
-	nng_msg *  msg;
+	nng_msg   *msg;
 	int        rv;
 	int        i;
 	uint64_t   start, end;
@@ -611,7 +613,7 @@ void
 throughput_client(const char *addr, size_t msgsize, int count)
 {
 	nng_socket s;
-	nng_msg *  msg;
+	nng_msg   *msg;
 	int        rv;
 	int        i;
 

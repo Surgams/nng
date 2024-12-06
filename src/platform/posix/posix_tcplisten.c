@@ -1,5 +1,5 @@
 //
-// Copyright 2020 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2024 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 // Copyright 2018 Devolutions <info@devolutions.net>
 //
@@ -27,6 +27,10 @@
 #define SOCK_CLOEXEC 0
 #endif
 
+#ifndef NNG_HAVE_INET6
+#undef NNG_ENABLE_IPV6
+#endif
+
 #include "posix_tcp.h"
 
 struct nni_tcp_listener {
@@ -52,6 +56,7 @@ nni_tcp_listener_init(nni_tcp_listener **lp)
 	l->pfd     = NULL;
 	l->closed  = false;
 	l->started = false;
+	l->nodelay = true;
 
 	nni_aio_list_init(&l->acceptq);
 	*lp = l;
@@ -94,7 +99,7 @@ tcp_listener_doaccept(nni_tcp_listener *l)
 		int            nd;
 		int            ka;
 		nni_posix_pfd *pfd;
-		nni_tcp_conn * c;
+		nni_tcp_conn  *c;
 
 		fd = nni_posix_pfd_fd(l->pfd);
 
@@ -203,10 +208,15 @@ nni_tcp_listener_listen(nni_tcp_listener *l, const nni_sockaddr *sa)
 	struct sockaddr_storage ss;
 	int                     rv;
 	int                     fd;
-	nni_posix_pfd *         pfd;
+	nni_posix_pfd          *pfd;
 
 	if (((len = nni_posix_nn2sockaddr(&ss, sa)) == 0) ||
-	    ((ss.ss_family != AF_INET) && (ss.ss_family != AF_INET6))) {
+#ifdef NNG_ENABLE_IPV6
+	    ((ss.ss_family != AF_INET) && (ss.ss_family != AF_INET6))
+#else
+	    (ss.ss_family != AF_INET)
+#endif
+	) {
 		return (NNG_EADDRINVAL);
 	}
 

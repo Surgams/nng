@@ -1,5 +1,5 @@
 //
-// Copyright 2020 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2024 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -60,50 +60,41 @@ nni_win_io_register(HANDLE h)
 	return (0);
 }
 
-int
+void
 nni_win_io_init(nni_win_io *io, nni_win_io_cb cb, void *ptr)
 {
 	ZeroMemory(&io->olpd, sizeof(io->olpd));
 
-	io->cb          = cb;
-	io->ptr         = ptr;
-	io->aio         = NULL;
-	io->olpd.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
-	if (io->olpd.hEvent == NULL) {
-		return (nni_win_error(GetLastError()));
-	}
-	return (0);
-}
-
-void
-nni_win_io_fini(nni_win_io *io)
-{
-	if (io->olpd.hEvent != NULL) {
-		CloseHandle((HANDLE) io->olpd.hEvent);
-	}
+	io->cb  = cb;
+	io->ptr = ptr;
+	io->aio = NULL;
 }
 
 int
-nni_win_io_sysinit(void)
+nni_win_io_sysinit(nng_init_params *params)
 {
-	HANDLE h;
-	int    i;
-	int    rv;
-	int    nthr = nni_plat_ncpu() * 2;
+	HANDLE  h;
+	int     i;
+	int     rv;
+	int16_t num_thr;
+	int16_t max_thr;
 
-	// Limits on the thread count.  This is fairly arbitrary.
-	if (nthr < 4) {
-		nthr = 4;
+	max_thr = params->max_poller_threads;
+	num_thr = params->num_poller_threads;
+
+	if ((max_thr > 0) && (num_thr > max_thr)) {
+		num_thr = max_thr;
 	}
-	if (nthr > 64) {
-		nthr = 64;
+	if (num_thr < 1) {
+		num_thr = 1;
 	}
-	if ((win_io_thrs = NNI_ALLOC_STRUCTS(win_io_thrs, nthr)) == NULL) {
+	params->num_poller_threads = num_thr;
+	if ((win_io_thrs = NNI_ALLOC_STRUCTS(win_io_thrs, num_thr)) == NULL) {
 		return (NNG_ENOMEM);
 	}
-	win_io_nthr = nthr;
+	win_io_nthr = num_thr;
 
-	h = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, nthr);
+	h = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, num_thr);
 	if (h == NULL) {
 		return (nni_win_error(GetLastError()));
 	}
@@ -140,7 +131,7 @@ nni_win_io_sysfini(void)
 		nni_thr_fini(&win_io_thrs[i]);
 	}
 
-        NNI_FREE_STRUCTS(win_io_thrs, win_io_nthr);
+	NNI_FREE_STRUCTS(win_io_thrs, win_io_nthr);
 }
 
 #endif // NNG_PLATFORM_WINDOWS

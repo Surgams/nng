@@ -1,5 +1,5 @@
 //
-// Copyright 2022 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2024 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -9,6 +9,7 @@
 //
 
 #include "core/nng_impl.h"
+#include "nng/nng.h"
 
 typedef struct nni_taskq_thr nni_taskq_thr;
 struct nni_taskq_thr {
@@ -243,22 +244,23 @@ nni_task_fini(nni_task *task)
 }
 
 int
-nni_taskq_sys_init(void)
+nni_taskq_sys_init(nng_init_params *params)
 {
-	int nthrs;
+	int16_t num_thr;
+	int16_t max_thr;
 
-#ifndef NNG_NUM_TASKQ_THREADS
-	nthrs = nni_plat_ncpu() * 2;
-#else
-	nthrs = NNG_NUM_TASKQ_THREADS;
-#endif
-#if NNG_MAX_TASKQ_THREADS > 0
-	if (nthrs > NNG_MAX_TASKQ_THREADS) {
-		nthrs = NNG_MAX_TASKQ_THREADS;
+	max_thr = params->max_task_threads;
+	num_thr = params->num_task_threads;
+
+	if ((max_thr > 0) && (num_thr > max_thr)) {
+		num_thr = max_thr;
 	}
-#endif
+	if (num_thr < 2) {
+		num_thr = 2;
+	}
+	params->num_task_threads = num_thr;
 
-	return (nni_taskq_init(&nni_taskq_systq, nthrs));
+	return (nni_taskq_init(&nni_taskq_systq, (int) num_thr));
 }
 
 void

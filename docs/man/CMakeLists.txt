@@ -1,5 +1,5 @@
 #
-# Copyright 2020 Staysail Systems, Inc. <info@staysail.tech>
+# Copyright 2024 Staysail Systems, Inc. <info@staysail.tech>
 # Copyright 2018 Capitar IT Group BV <info@capitar.com>
 # Copyright 2019 Devolutions <info@devolutions.net>
 #
@@ -85,36 +85,32 @@ if (NNG_ENABLE_DOC)
             nng_close
             nng_ctx_close
             nng_ctx_get
-            nng_ctx_getopt
             nng_ctx_id
             nng_ctx_open
             nng_ctx_recv
             nng_ctx_send
             nng_ctx_set
-            nng_ctx_setopt
             nng_device
             nng_dial
             nng_dialer_close
             nng_dialer_create
             nng_dialer_get
-            nng_dialer_getopt
             nng_dialer_id
             nng_dialer_set
-            nng_dialer_setopt
             nng_dialer_start
             nng_free
-            nng_getopt
-            nng_inproc_register
-            nng_ipc_register
             nng_listen
             nng_listener_close
             nng_listener_create
             nng_listener_get
-            nng_listener_getopt
             nng_listener_id
             nng_listener_set
-            nng_listener_setopt
             nng_listener_start
+            nng_log
+            nng_log_get_level
+            nng_log_set_facility
+            nng_log_set_level
+            nng_log_set_logger
             nng_msg_alloc
             nng_msg_append
             nng_msg_body
@@ -139,7 +135,6 @@ if (NNG_ENABLE_DOC)
             nng_pipe_close
             nng_pipe_dialer
             nng_pipe_get
-            nng_pipe_getopt
             nng_pipe_id
             nng_pipe_listener
             nng_pipe_notify
@@ -156,7 +151,7 @@ if (NNG_ENABLE_DOC)
             nng_send
             nng_send_aio
             nng_sendmsg
-            nng_setopt
+            nng_set
             nng_sleep_aio
             nng_socket_id
             nng_socket_get
@@ -177,45 +172,16 @@ if (NNG_ENABLE_DOC)
             nng_stat_type
             nng_stat_unit
             nng_stat_value
+            nng_str_sockaddr
             nng_strdup
             nng_strerror
             nng_strfree
             nng_sub_open
             nng_surveyor_open
-            nng_tcp_register
-            nng_tls_register
             nng_url_clone
             nng_url_free
             nng_url_parse
             nng_version
-            nng_ws_register
-            nng_wss_register
-            nng_zt_register
-            )
-
-    set(NNG_MAN3COMPAT
-            nn_allocmsg
-            nn_bind
-            nn_close
-            nn_cmsg
-            nn_connect
-            nn_device
-            nn_errno
-            nn_freemsg
-            nn_get_statistic
-            nn_getsockopt
-            nn_poll
-            nn_reallocmsg
-            nn_recv
-            nn_recvmsg
-            nn_send
-            nn_sendmsg
-            nn_setsockopt
-            nn_shutdown
-            nn_socket
-            nn_strerror
-            nn_term
-            nng_compat
             )
 
     set(NNG_MAN3HTTP
@@ -295,6 +261,7 @@ if (NNG_ENABLE_DOC)
             nng_cv_wait
             nng_cv_wake
             nng_cv_wake1
+            nng_id_map
             nng_msleep
             nng_mtx_alloc
             nng_mtx_free
@@ -302,6 +269,7 @@ if (NNG_ENABLE_DOC)
             nng_mtx_unlock
             nng_opts_parse
             nng_random
+            nng_socket_pair
             nng_thread_create
             nng_thread_destroy
             nng_thread_set_name
@@ -313,7 +281,6 @@ if (NNG_ENABLE_DOC)
             nng_stream_get
             nng_stream_recv
             nng_stream_send
-            nng_stream_set
             nng_stream_dialer_alloc
             nng_stream_dialer_close
             nng_stream_dialer_dial
@@ -338,6 +305,7 @@ if (NNG_ENABLE_DOC)
             nng_tls_config_free
             nng_tls_config_hold
             nng_tls_config_own_cert
+            nng_tls_config_psk
             nng_tls_config_server_name
             nng_tls_engine_description
             nng_tls_engine_fips_mode
@@ -388,6 +356,7 @@ if (NNG_ENABLE_DOC)
             nng_rep
             nng_req
             nng_respondent
+            nng_socket
             nng_sub
             nng_surveyor
             nng_tcp
@@ -402,10 +371,6 @@ if (NNG_ENABLE_DOC)
 
     foreach (F ${NNG_MAN3})
         nng_man(${F} 3)
-    endforeach ()
-
-    foreach (F ${NNG_MAN3COMPAT})
-        nng_man(${F} 3compat)
     endforeach ()
 
     foreach (F ${NNG_MAN3HTTP})

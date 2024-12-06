@@ -1,5 +1,5 @@
 //
-// Copyright 2020 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2024 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Cody Piersall <cody.piersall@gmail.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -8,6 +8,7 @@
 // found online at https://opensource.org/licenses/MIT.
 //
 
+#include "nng/nng.h"
 #include <nuts.h>
 
 static void
@@ -99,7 +100,7 @@ test_wild_card_host(void)
 	port = nuts_next_port();
 
 	// we use ws4 to ensure 127.0.0.1 binding
-	snprintf(addr, sizeof(addr), "ws4://*:%u/test", port);
+	snprintf(addr, sizeof(addr), "ws4://:%u/test", port);
 	NUTS_PASS(nng_listen(s1, addr, NULL, 0));
 	nng_msleep(100);
 
@@ -143,8 +144,9 @@ test_ws_recv_max(void)
 	nng_socket   s0;
 	nng_socket   s1;
 	nng_listener l;
+	nng_dialer   d;
 	size_t       sz;
-	char *       addr;
+	char        *addr;
 
 	memset(msg, 0, sizeof(msg)); // required to silence valgrind
 
@@ -156,10 +158,14 @@ test_ws_recv_max(void)
 	NUTS_PASS(nng_socket_get_size(s0, NNG_OPT_RECVMAXSZ, &sz));
 	NUTS_TRUE(sz == 200);
 	NUTS_PASS(nng_listener_set_size(l, NNG_OPT_RECVMAXSZ, 100));
+	NUTS_PASS(nng_listener_get_size(l, NNG_OPT_RECVMAXSZ, &sz));
+	NUTS_TRUE(sz == 100);
 	NUTS_PASS(nng_listener_start(l, 0));
 
 	NUTS_OPEN(s1);
-	NUTS_PASS(nng_dial(s1, addr, NULL, 0));
+	NUTS_PASS(nng_dial(s1, addr, &d, 0));
+	NUTS_PASS(nng_dialer_set_size(d, NNG_OPT_RECVMAXSZ, 256));
+	NUTS_PASS(nng_dialer_get_size(d, NNG_OPT_RECVMAXSZ, &sz));
 	NUTS_PASS(nng_send(s1, msg, 95, 0));
 	NUTS_PASS(nng_socket_set_ms(s1, NNG_OPT_SENDTIMEO, 100));
 	NUTS_PASS(nng_recv(s0, buf, &sz, 0));
@@ -170,11 +176,85 @@ test_ws_recv_max(void)
 	NUTS_CLOSE(s1);
 }
 
+void
+test_ws_no_tls(void)
+{
+	nng_socket      s0;
+	nng_listener    l;
+	nng_dialer      d;
+	char           *addr;
+	nng_tls_config *tls;
+
+	NUTS_ADDR(addr, "ws");
+	NUTS_OPEN(s0);
+	NUTS_PASS(nng_listener_create(&l, s0, addr));
+	NUTS_FAIL(nng_listener_get_tls(l, &tls), NNG_ENOTSUP);
+
+	NUTS_PASS(nng_dialer_create(&d, s0, addr));
+	NUTS_FAIL(nng_dialer_get_tls(d, &tls), NNG_ENOTSUP);
+	NUTS_CLOSE(s0);
+}
+
+static void
+check_props_v4(nng_msg *msg)
+{
+	nng_pipe     p;
+	size_t       z;
+	nng_sockaddr la;
+	nng_sockaddr ra;
+	bool         b;
+
+	p = nng_msg_get_pipe(msg);
+	NUTS_TRUE(nng_pipe_id(p) > 0);
+	NUTS_PASS(nng_pipe_get_addr(p, NNG_OPT_LOCADDR, &la));
+	NUTS_FAIL(nng_pipe_get_size(p, NNG_OPT_LOCADDR, &z), NNG_EBADTYPE);
+	NUTS_TRUE(la.s_family == NNG_AF_INET);
+	NUTS_TRUE(la.s_in.sa_port != 0);
+	NUTS_TRUE(la.s_in.sa_addr == nuts_be32(0x7f000001));
+
+	NUTS_PASS(nng_pipe_get_addr(p, NNG_OPT_REMADDR, &ra));
+	NUTS_TRUE(ra.s_family == NNG_AF_INET);
+	NUTS_TRUE(ra.s_in.sa_port != 0);
+	NUTS_TRUE(ra.s_in.sa_addr == nuts_be32(0x7f000001));
+	NUTS_TRUE(ra.s_in.sa_port != la.s_in.sa_port);
+	NUTS_FAIL(nng_pipe_get_size(p, NNG_OPT_REMADDR, &z), NNG_EBADTYPE);
+
+	NUTS_PASS(nng_pipe_get_bool(p, NNG_OPT_TCP_KEEPALIVE, &b));
+	NUTS_TRUE(b == false); // default
+
+	NUTS_PASS(nng_pipe_get_bool(p, NNG_OPT_TCP_NODELAY, &b));
+	NUTS_TRUE(b); // default
+
+	// Request Header
+	char *buf = NULL;
+	NUTS_PASS(nng_pipe_get_string(p, NNG_OPT_WS_REQUEST_HEADERS, &buf));
+	NUTS_TRUE(strstr(buf, "Sec-WebSocket-Key") != NULL);
+	nng_strfree(buf);
+
+	// Response Header
+	NUTS_PASS(nng_pipe_get_string(p, NNG_OPT_WS_RESPONSE_HEADERS, &buf));
+	NUTS_TRUE(strstr(buf, "Sec-WebSocket-Accept") != NULL);
+	nng_strfree(buf);
+}
+
+void
+test_ws_props_v4(void)
+{
+	nuts_tran_msg_props("ws", check_props_v4);
+}
+
+NUTS_DECLARE_TRAN_TESTS(ws)
+NUTS_DECLARE_TRAN_TESTS(ws6)
+
 TEST_LIST = {
 	{ "ws url path filters", test_ws_url_path_filters },
 	{ "ws wild card port", test_wild_card_port },
 	{ "ws wild card host", test_wild_card_host },
 	{ "ws empty host", test_empty_host },
 	{ "ws recv max", test_ws_recv_max },
+	{ "ws no tls", test_ws_no_tls },
+	NUTS_INSERT_TRAN_TESTS(ws),
+	{ "ws msg props", test_ws_props_v4 },
+	NUTS_INSERT_TRAN_TESTS(ws6),
 	{ NULL, NULL },
 };

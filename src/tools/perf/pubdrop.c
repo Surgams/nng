@@ -1,5 +1,5 @@
 //
-// Copyright 2019 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2024 Staysail Systems, Inc. <info@staysail.tech>
 //
 // This software is supplied under the terms of the MIT License, a
 // copy of which should be located in the distribution where this
@@ -15,7 +15,6 @@
 #include <string.h>
 
 #include <nng/nng.h>
-#include <nng/supplemental/util/platform.h>
 
 // pubdrop - this is a simple testing utility that lets us measure PUB/SUB
 // performance, including dropped messages, delivery across multiple threads,
@@ -76,6 +75,9 @@ main(int argc, char **argv)
 	argc--;
 	argv++;
 
+	nng_init(NULL);
+	atexit(nng_fini);
+
 	// We calculate a delay factor to roughly delay 1 usec.  We don't
 	// need this to be perfect, just reproducible on the same host.
 	unsigned long cnt = 1000000;
@@ -117,7 +119,7 @@ parse_int(const char *arg, const char *what)
 }
 
 struct pubdrop_args {
-	const char *       addr;
+	const char        *addr;
 	bool               start;
 	unsigned long long msgsize;
 	unsigned long long count;
@@ -128,8 +130,8 @@ struct pubdrop_args {
 	unsigned long long recvs;
 	nng_time           beg;
 	nng_time           end;
-	nng_mtx *          mtx;
-	nng_cv *           cv;
+	nng_mtx           *mtx;
+	nng_cv            *cv;
 };
 
 static void
@@ -138,7 +140,7 @@ pub_server(void *arg)
 	struct pubdrop_args *pa = arg;
 	nng_socket           sock;
 	int                  rv;
-	nng_msg *            msg;
+	nng_msg             *msg;
 	nng_time             start;
 	nng_time             end;
 
@@ -191,7 +193,7 @@ sub_client(void *arg)
 	struct pubdrop_args *pa = arg;
 	nng_socket           sock;
 	int                  rv;
-	nng_msg *            msg;
+	nng_msg             *msg;
 	unsigned long long   recvs;
 	unsigned long long   drops;
 	unsigned long long   gaps;
@@ -207,7 +209,7 @@ sub_client(void *arg)
 	if ((rv = nng_socket_set_ms(sock, NNG_OPT_RECONNMINT, 51)) != 0) {
 		die("setopt: %s", nng_strerror(rv));
 	}
-	if ((rv = nng_socket_set(sock, NNG_OPT_SUB_SUBSCRIBE, "", 0)) != 0) {
+	if ((rv = nng_sub0_socket_subscribe(sock, "", 0)) != 0) {
 		die("setopt: %s", nng_strerror(rv));
 	}
 	if ((rv = nng_socket_set_ms(sock, NNG_OPT_RECVTIMEO, 10000)) != 0) {
@@ -255,7 +257,7 @@ sub_client(void *arg)
 static void
 do_pubdrop(int argc, char **argv)
 {
-	nng_thread **       thrs;
+	nng_thread        **thrs;
 	struct pubdrop_args pa;
 	int                 rv;
 	int                 nsubs;
@@ -276,7 +278,7 @@ do_pubdrop(int argc, char **argv)
 		die("Message size too small.");
 	}
 
-	thrs = calloc(sizeof(nng_thread *), (size_t) pa.count + 1);
+	thrs = calloc((size_t) pa.count + 1, sizeof(nng_thread *));
 	if (((rv = nng_mtx_alloc(&pa.mtx)) != 0) ||
 	    ((nng_cv_alloc(&pa.cv, pa.mtx)) != 0)) {
 		die("Startup: %s\n", nng_strerror(rv));
@@ -324,4 +326,7 @@ do_pubdrop(int argc, char **argv)
 	printf("Drop rate %.2f%%\n", expect ? 100.0 * missing / expect : 0);
 
 	nng_mtx_unlock(pa.mtx);
+	nng_cv_free(pa.cv);
+	nng_mtx_free(pa.mtx);
+	free(thrs);
 }

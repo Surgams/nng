@@ -1,5 +1,5 @@
 //
-// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2024 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 // Copyright 2019 Devolutions <info@devolutions.net>
 //
@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "core/nng_impl.h"
+#include "nng/nng.h"
 
 // TCP transport.   Platform specific TCP operations must be
 // supplied as well.
@@ -22,14 +23,14 @@ typedef struct tcptran_ep   tcptran_ep;
 
 // tcp_pipe is one end of a TCP connection.
 struct tcptran_pipe {
-	nng_stream *    conn;
-	nni_pipe *      npipe;
+	nng_stream     *conn;
+	nni_pipe       *npipe;
 	uint16_t        peer;
 	uint16_t        proto;
 	size_t          rcvmax;
 	bool            closed;
 	nni_list_node   node;
-	tcptran_ep *    ep;
+	tcptran_ep     *ep;
 	nni_atomic_flag reaped;
 	nni_reap_node   reap;
 	uint8_t         txlen[sizeof(uint64_t)];
@@ -40,10 +41,10 @@ struct tcptran_pipe {
 	size_t          wantrxhead;
 	nni_list        recvq;
 	nni_list        sendq;
-	nni_aio *       txaio;
-	nni_aio *       rxaio;
-	nni_aio *       negoaio;
-	nni_msg *       rxmsg;
+	nni_aio        *txaio;
+	nni_aio        *rxaio;
+	nni_aio        *negoaio;
+	nni_msg        *rxmsg;
 	nni_mtx         mtx;
 };
 
@@ -54,18 +55,16 @@ struct tcptran_ep {
 	bool                 fini;
 	bool                 started;
 	bool                 closed;
-	nng_url *            url;
-	const char *         host; // for dialers
-	nng_sockaddr         src;
+	const char          *host;   // for dialers
 	int                  refcnt; // active pipes
-	nni_aio *            useraio;
-	nni_aio *            connaio;
-	nni_aio *            timeaio;
+	nni_aio             *useraio;
+	nni_aio             *connaio;
+	nni_aio             *timeaio;
 	nni_list             busypipes; // busy pipes -- ones passed to socket
 	nni_list             waitpipes; // pipes waiting to match to socket
 	nni_list             negopipes; // pipes busy negotiating
 	nni_reap_node        reap;
-	nng_stream_dialer *  dialer;
+	nng_stream_dialer   *dialer;
 	nng_stream_listener *listener;
 
 #ifdef NNG_ENABLE_STATS
@@ -140,7 +139,7 @@ static void
 tcptran_pipe_fini(void *arg)
 {
 	tcptran_pipe *p = arg;
-	tcptran_ep *  ep;
+	tcptran_ep   *ep;
 
 	tcptran_pipe_stop(p);
 	if ((ep = p->ep) != NULL) {
@@ -153,10 +152,10 @@ tcptran_pipe_fini(void *arg)
 		nni_mtx_unlock(&ep->mtx);
 	}
 
+	nng_stream_free(p->conn);
 	nni_aio_free(p->rxaio);
 	nni_aio_free(p->txaio);
 	nni_aio_free(p->negoaio);
-	nng_stream_free(p->conn);
 	nni_msg_free(p->rxmsg);
 	nni_mtx_fini(&p->mtx);
 	NNI_FREE_STRUCT(p);
@@ -202,7 +201,7 @@ tcptran_pipe_alloc(tcptran_pipe **pipep)
 static void
 tcptran_ep_match(tcptran_ep *ep)
 {
-	nni_aio *     aio;
+	nni_aio      *aio;
 	tcptran_pipe *p;
 
 	if (((aio = ep->useraio) == NULL) ||
@@ -221,9 +220,9 @@ static void
 tcptran_pipe_nego_cb(void *arg)
 {
 	tcptran_pipe *p   = arg;
-	tcptran_ep *  ep  = p->ep;
-	nni_aio *     aio = p->negoaio;
-	nni_aio *     uaio;
+	tcptran_ep   *ep  = p->ep;
+	nni_aio      *aio = p->negoaio;
+	nni_aio      *uaio;
 	int           rv;
 
 	nni_mtx_lock(&ep->mtx);
@@ -293,7 +292,9 @@ error:
 		ep->useraio = NULL;
 		nni_aio_finish_error(uaio, rv);
 	}
+	nni_list_remove(&ep->negopipes, p);
 	nni_mtx_unlock(&ep->mtx);
+
 	tcptran_pipe_reap(p);
 }
 
@@ -302,10 +303,10 @@ tcptran_pipe_send_cb(void *arg)
 {
 	tcptran_pipe *p = arg;
 	int           rv;
-	nni_aio *     aio;
+	nni_aio      *aio;
 	size_t        n;
-	nni_msg *     msg;
-	nni_aio *     txaio = p->txaio;
+	nni_msg      *msg;
+	nni_aio      *txaio = p->txaio;
 
 	nni_mtx_lock(&p->mtx);
 	aio = nni_list_first(&p->sendq);
@@ -348,11 +349,11 @@ static void
 tcptran_pipe_recv_cb(void *arg)
 {
 	tcptran_pipe *p = arg;
-	nni_aio *     aio;
+	nni_aio      *aio;
 	int           rv;
 	size_t        n;
-	nni_msg *     msg;
-	nni_aio *     rxaio = p->rxaio;
+	nni_msg      *msg;
+	nni_aio      *rxaio = p->rxaio;
 
 	nni_mtx_lock(&p->mtx);
 	aio = nni_list_first(&p->recvq);
@@ -385,6 +386,20 @@ tcptran_pipe_recv_cb(void *arg)
 		// Make sure the message payload is not too big.  If it is
 		// the caller will shut down the pipe.
 		if ((len > p->rcvmax) && (p->rcvmax > 0)) {
+			nng_sockaddr_storage ss;
+			nng_sockaddr        *sa = (nng_sockaddr *) &ss;
+			char                 peername[64] = "unknown";
+			if ((rv = nng_stream_get_addr(
+			         p->conn, NNG_OPT_REMADDR, sa)) == 0) {
+				(void) nng_str_sockaddr(
+				    sa, peername, sizeof(peername));
+			}
+			nng_log_warn("NNG-RCVMAX",
+			    "Oversize message of %lu bytes (> %lu) "
+			    "on socket<%u> pipe<%u> from TCP %s",
+			    (unsigned long) len, (unsigned long) p->rcvmax,
+			    nni_pipe_sock_id(p->npipe), nni_pipe_id(p->npipe),
+			    peername);
 			rv = NNG_EMSGSIZE;
 			goto recv_error;
 		}
@@ -512,6 +527,10 @@ tcptran_pipe_send(void *arg, nni_aio *aio)
 	int           rv;
 
 	if (nni_aio_begin(aio) != 0) {
+		// No way to give the message back to the protocol, so
+		// we just discard it silently to prevent it from leaking.
+		nni_msg_free(nni_aio_get_msg(aio));
+		nni_aio_set_msg(aio, NULL);
 		return;
 	}
 	nni_mtx_lock(&p->mtx);
@@ -674,7 +693,7 @@ tcptran_ep_fini(void *arg)
 static void
 tcptran_ep_close(void *arg)
 {
-	tcptran_ep *  ep = arg;
+	tcptran_ep   *ep = arg;
 	tcptran_pipe *p;
 
 	nni_mtx_lock(&ep->mtx);
@@ -704,63 +723,6 @@ tcptran_ep_close(void *arg)
 	nni_mtx_unlock(&ep->mtx);
 }
 
-// This parses off the optional source address that this transport uses.
-// The special handling of this URL format is quite honestly an historical
-// mistake, which we would remove if we could.
-static int
-tcptran_url_parse_source(nng_url *url, nng_sockaddr *sa, const nng_url *surl)
-{
-	int      af;
-	char *   semi;
-	char *   src;
-	size_t   len;
-	int      rv;
-	nni_aio *aio;
-
-	// We modify the URL.  This relies on the fact that the underlying
-	// transport does not free this, so we can just use references.
-
-	url->u_scheme   = surl->u_scheme;
-	url->u_port     = surl->u_port;
-	url->u_hostname = surl->u_hostname;
-
-	if ((semi = strchr(url->u_hostname, ';')) == NULL) {
-		memset(sa, 0, sizeof(*sa));
-		return (0);
-	}
-
-	len             = (size_t) (semi - url->u_hostname);
-	url->u_hostname = semi + 1;
-
-	if (strcmp(surl->u_scheme, "tcp") == 0) {
-		af = NNG_AF_UNSPEC;
-	} else if (strcmp(surl->u_scheme, "tcp4") == 0) {
-		af = NNG_AF_INET;
-	} else if (strcmp(surl->u_scheme, "tcp6") == 0) {
-		af = NNG_AF_INET6;
-	} else {
-		return (NNG_EADDRINVAL);
-	}
-
-	if ((src = nni_alloc(len + 1)) == NULL) {
-		return (NNG_ENOMEM);
-	}
-	memcpy(src, surl->u_hostname, len);
-	src[len] = '\0';
-
-	if ((rv = nni_aio_alloc(&aio, NULL, NULL)) != 0) {
-		nni_free(src, len + 1);
-		return (rv);
-	}
-
-	nni_resolv_ip(src, "0", af, true, sa, aio);
-	nni_aio_wait(aio);
-	rv = nni_aio_result(aio);
-	nni_aio_free(aio);
-	nni_free(src, len + 1);
-	return (rv);
-}
-
 static void
 tcptran_timer_cb(void *arg)
 {
@@ -773,11 +735,11 @@ tcptran_timer_cb(void *arg)
 static void
 tcptran_accept_cb(void *arg)
 {
-	tcptran_ep *  ep  = arg;
-	nni_aio *     aio = ep->connaio;
+	tcptran_ep   *ep  = arg;
+	nni_aio      *aio = ep->connaio;
 	tcptran_pipe *p;
 	int           rv;
-	nng_stream *  conn;
+	nng_stream   *conn;
 
 	nni_mtx_lock(&ep->mtx);
 
@@ -828,11 +790,11 @@ error:
 static void
 tcptran_dial_cb(void *arg)
 {
-	tcptran_ep *  ep  = arg;
-	nni_aio *     aio = ep->connaio;
+	tcptran_ep   *ep  = arg;
+	nni_aio      *aio = ep->connaio;
 	tcptran_pipe *p;
 	int           rv;
-	nng_stream *  conn;
+	nng_stream   *conn;
 
 	if ((rv = nni_aio_result(aio)) != 0) {
 		goto error;
@@ -871,6 +833,7 @@ static int
 tcptran_ep_init(tcptran_ep **epp, nng_url *url, nni_sock *sock)
 {
 	tcptran_ep *ep;
+	NNI_ARG_UNUSED(url);
 
 	if ((ep = NNI_ALLOC_STRUCT(ep)) == NULL) {
 		return (NNG_ENOMEM);
@@ -881,7 +844,6 @@ tcptran_ep_init(tcptran_ep **epp, nng_url *url, nni_sock *sock)
 	NNI_LIST_INIT(&ep->negopipes, tcptran_pipe, node);
 
 	ep->proto = nni_sock_proto_id(sock);
-	ep->url   = url;
 
 #ifdef NNG_ENABLE_STATS
 	static const nni_stat_info rcv_max_info = {
@@ -901,11 +863,9 @@ tcptran_ep_init(tcptran_ep **epp, nng_url *url, nni_sock *sock)
 static int
 tcptran_dialer_init(void **dp, nng_url *url, nni_dialer *ndialer)
 {
-	tcptran_ep * ep;
-	int          rv;
-	nng_sockaddr srcsa;
-	nni_sock *   sock = nni_dialer_sock(ndialer);
-	nng_url      myurl;
+	tcptran_ep *ep;
+	int         rv;
+	nni_sock   *sock = nni_dialer_sock(ndialer);
 
 	// Check for invalid URL components.
 	if ((strlen(url->u_path) != 0) && (strcmp(url->u_path, "/") != 0)) {
@@ -913,12 +873,8 @@ tcptran_dialer_init(void **dp, nng_url *url, nni_dialer *ndialer)
 	}
 	if ((url->u_fragment != NULL) || (url->u_userinfo != NULL) ||
 	    (url->u_query != NULL) || (strlen(url->u_hostname) == 0) ||
-	    (strlen(url->u_port) == 0)) {
+	    (url->u_port == 0)) {
 		return (NNG_EADDRINVAL);
-	}
-
-	if ((rv = tcptran_url_parse_source(&myurl, &srcsa, url)) != 0) {
-		return (rv);
 	}
 
 	if ((rv = tcptran_ep_init(&ep, url, sock)) != 0) {
@@ -927,13 +883,7 @@ tcptran_dialer_init(void **dp, nng_url *url, nni_dialer *ndialer)
 
 	if ((rv != 0) ||
 	    ((rv = nni_aio_alloc(&ep->connaio, tcptran_dial_cb, ep)) != 0) ||
-	    ((rv = nng_stream_dialer_alloc_url(&ep->dialer, &myurl)) != 0)) {
-		tcptran_ep_fini(ep);
-		return (rv);
-	}
-	if ((srcsa.s_family != NNG_AF_UNSPEC) &&
-	    ((rv = nni_stream_dialer_set(ep->dialer, NNG_OPT_LOCADDR, &srcsa,
-	          sizeof(srcsa), NNI_TYPE_SOCKADDR)) != 0)) {
+	    ((rv = nng_stream_dialer_alloc_url(&ep->dialer, url)) != 0)) {
 		tcptran_ep_fini(ep);
 		return (rv);
 	}
@@ -950,7 +900,7 @@ tcptran_listener_init(void **lp, nng_url *url, nni_listener *nlistener)
 {
 	tcptran_ep *ep;
 	int         rv;
-	nni_sock *  sock = nni_listener_sock(nlistener);
+	nni_sock   *sock = nni_listener_sock(nlistener);
 
 	// Check for invalid URL components.
 	if ((strlen(url->u_path) != 0) && (strcmp(url->u_path, "/") != 0)) {
@@ -1023,26 +973,6 @@ tcptran_ep_connect(void *arg, nni_aio *aio)
 }
 
 static int
-tcptran_ep_get_url(void *arg, void *v, size_t *szp, nni_opt_type t)
-{
-	tcptran_ep *ep = arg;
-	char *      s;
-	int         rv;
-	int         port = 0;
-
-	if (ep->listener != NULL) {
-		(void) nng_stream_listener_get_int(
-		    ep->listener, NNG_OPT_TCP_BOUND_PORT, &port);
-	}
-
-	if ((rv = nni_url_asprintf_port(&s, ep->url, port)) == 0) {
-		rv = nni_copyout_str(s, v, szp, t);
-		nni_strfree(s);
-	}
-	return (rv);
-}
-
-static int
 tcptran_ep_get_recvmaxsz(void *arg, void *v, size_t *szp, nni_opt_type t)
 {
 	tcptran_ep *ep = arg;
@@ -1061,18 +991,8 @@ tcptran_ep_set_recvmaxsz(void *arg, const void *v, size_t sz, nni_opt_type t)
 	size_t      val;
 	int         rv;
 	if ((rv = nni_copyin_size(&val, v, sz, 0, NNI_MAXSZ, t)) == 0) {
-		tcptran_pipe *p;
 		nni_mtx_lock(&ep->mtx);
 		ep->rcvmax = val;
-		NNI_LIST_FOREACH (&ep->waitpipes, p) {
-			p->rcvmax = val;
-		}
-		NNI_LIST_FOREACH (&ep->negopipes, p) {
-			p->rcvmax = val;
-		}
-		NNI_LIST_FOREACH (&ep->busypipes, p) {
-			p->rcvmax = val;
-		}
 		nni_mtx_unlock(&ep->mtx);
 #ifdef NNG_ENABLE_STATS
 		nni_stat_set_value(&ep->st_rcv_max, val);
@@ -1082,13 +1002,19 @@ tcptran_ep_set_recvmaxsz(void *arg, const void *v, size_t sz, nni_opt_type t)
 }
 
 static int
-tcptran_ep_bind(void *arg)
+tcptran_ep_bind(void *arg, nng_url *url)
 {
 	tcptran_ep *ep = arg;
 	int         rv;
 
 	nni_mtx_lock(&ep->mtx);
 	rv = nng_stream_listener_listen(ep->listener);
+	if (rv == 0) {
+		int port;
+		nng_stream_listener_get_int(
+		    ep->listener, NNG_OPT_TCP_BOUND_PORT, &port);
+		url->u_port = (uint32_t) port;
+	}
 	nni_mtx_unlock(&ep->mtx);
 
 	return (rv);
@@ -1145,10 +1071,6 @@ static const nni_option tcptran_ep_opts[] = {
 	    .o_name = NNG_OPT_RECVMAXSZ,
 	    .o_get  = tcptran_ep_get_recvmaxsz,
 	    .o_set  = tcptran_ep_set_recvmaxsz,
-	},
-	{
-	    .o_name = NNG_OPT_URL,
-	    .o_get  = tcptran_ep_get_url,
 	},
 	// terminate list
 	{
@@ -1249,6 +1171,7 @@ static nni_sp_tran tcp4_tran = {
 	.tran_fini     = tcptran_fini,
 };
 
+#ifdef NNG_ENABLE_IPV6
 static nni_sp_tran tcp6_tran = {
 	.tran_scheme   = "tcp6",
 	.tran_dialer   = &tcptran_dialer_ops,
@@ -1257,13 +1180,6 @@ static nni_sp_tran tcp6_tran = {
 	.tran_init     = tcptran_init,
 	.tran_fini     = tcptran_fini,
 };
-
-#ifndef NNG_ELIDE_DEPRECATED
-int
-nng_tcp_register(void)
-{
-	return (nni_init());
-}
 #endif
 
 void
@@ -1271,5 +1187,7 @@ nni_sp_tcp_register(void)
 {
 	nni_sp_tran_register(&tcp_tran);
 	nni_sp_tran_register(&tcp4_tran);
+#ifdef NNG_ENABLE_IPV6
 	nni_sp_tran_register(&tcp6_tran);
+#endif
 }

@@ -1,5 +1,5 @@
 //
-// Copyright 2020 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2024 Staysail Systems, Inc. <info@staysail.tech>
 //
 // This software is supplied under the terms of the MIT License, a
 // copy of which should be located in the distribution where this
@@ -7,35 +7,34 @@
 // found online at https://opensource.org/licenses/MIT.
 //
 
+#include "nng/nng.h"
 #include <nuts.h>
 
 static void
 test_rep_identity(void)
 {
-	nng_socket s;
-	int        p1, p2;
-	char *     n1;
-	char *     n2;
+	nng_socket  s;
+	uint16_t    p1, p2;
+	const char *n1;
+	const char *n2;
 
 	NUTS_PASS(nng_rep0_open(&s));
-	NUTS_PASS(nng_socket_get_int(s, NNG_OPT_PROTO, &p1));
-	NUTS_PASS(nng_socket_get_int(s, NNG_OPT_PEER, &p2));
-	NUTS_PASS(nng_socket_get_string(s, NNG_OPT_PROTONAME, &n1));
-	NUTS_PASS(nng_socket_get_string(s, NNG_OPT_PEERNAME, &n2));
+	NUTS_PASS(nng_socket_proto_id(s, &p1));
+	NUTS_PASS(nng_socket_peer_id(s, &p2));
+	NUTS_PASS(nng_socket_proto_name(s, &n1));
+	NUTS_PASS(nng_socket_peer_name(s, &n2));
 	NUTS_CLOSE(s);
 	NUTS_TRUE(p1 == NNG_REP0_SELF);
 	NUTS_TRUE(p2 == NNG_REP0_PEER);
 	NUTS_MATCH(n1, NNG_REP0_SELF_NAME);
 	NUTS_MATCH(n2, NNG_REP0_PEER_NAME);
-	nng_strfree(n1);
-	nng_strfree(n2);
 }
 
 void
 test_rep_send_bad_state(void)
 {
 	nng_socket rep;
-	nng_msg *  msg = NULL;
+	nng_msg   *msg = NULL;
 
 	NUTS_TRUE(nng_rep0_open(&rep) == 0);
 	NUTS_TRUE(nng_msg_alloc(&msg, 0) == 0);
@@ -53,7 +52,7 @@ test_rep_poll_writeable(void)
 
 	NUTS_PASS(nng_req0_open(&req));
 	NUTS_PASS(nng_rep0_open(&rep));
-	NUTS_PASS(nng_socket_get_int(rep, NNG_OPT_SENDFD, &fd));
+	NUTS_PASS(nng_socket_get_send_poll_fd(rep, &fd));
 	NUTS_TRUE(fd >= 0);
 
 	// Not writable before connect.
@@ -86,11 +85,11 @@ test_rep_poll_readable(void)
 	int        fd;
 	nng_socket req;
 	nng_socket rep;
-	nng_msg *  msg;
+	nng_msg   *msg;
 
 	NUTS_PASS(nng_req0_open(&req));
 	NUTS_PASS(nng_rep0_open(&rep));
-	NUTS_PASS(nng_socket_get_int(rep, NNG_OPT_RECVFD, &fd));
+	NUTS_PASS(nng_socket_get_recv_poll_fd(rep, &fd));
 	NUTS_TRUE(fd >= 0);
 
 	// Not readable if not connected!
@@ -119,27 +118,12 @@ test_rep_poll_readable(void)
 }
 
 void
-test_rep_context_no_poll(void)
-{
-	int        fd;
-	nng_socket req;
-	nng_ctx    ctx;
-
-	NUTS_PASS(nng_rep0_open(&req));
-	NUTS_PASS(nng_ctx_open(&ctx, req));
-	NUTS_FAIL(nng_ctx_get_int(ctx, NNG_OPT_SENDFD, &fd), NNG_ENOTSUP);
-	NUTS_FAIL(nng_ctx_get_int(ctx, NNG_OPT_RECVFD, &fd), NNG_ENOTSUP);
-	NUTS_PASS(nng_ctx_close(ctx));
-	NUTS_CLOSE(req);
-}
-
-void
 test_rep_validate_peer(void)
 {
-	nng_socket s1, s2;
-	nng_stat * stats;
-	nng_stat * reject;
-	char *     addr;
+	nng_socket      s1, s2;
+	nng_stat       *stats;
+	const nng_stat *reject;
+	char           *addr;
 
 	NUTS_ADDR(addr, "inproc");
 	NUTS_PASS(nng_rep0_open(&s1));
@@ -167,8 +151,8 @@ void
 test_rep_double_recv(void)
 {
 	nng_socket s1;
-	nng_aio *  aio1;
-	nng_aio *  aio2;
+	nng_aio   *aio1;
+	nng_aio   *aio2;
 
 	NUTS_PASS(nng_rep0_open(&s1));
 	NUTS_PASS(nng_aio_alloc(&aio1, NULL, NULL));
@@ -180,9 +164,122 @@ test_rep_double_recv(void)
 	nng_aio_wait(aio2);
 	NUTS_FAIL(nng_aio_result(aio2), NNG_ESTATE);
 	NUTS_CLOSE(s1);
+	nng_aio_wait(aio1);
 	NUTS_FAIL(nng_aio_result(aio1), NNG_ECLOSED);
 	nng_aio_free(aio1);
 	nng_aio_free(aio2);
+}
+
+void
+test_rep_huge_send(void)
+{
+	nng_socket rep;
+	nng_socket req;
+	nng_msg   *m;
+	nng_msg   *d;
+	nng_aio   *aio;
+
+	NUTS_PASS(nng_rep_open(&rep));
+	NUTS_PASS(nng_req_open(&req));
+	NUTS_PASS(nng_socket_set_ms(rep, NNG_OPT_RECVTIMEO, 1000));
+	NUTS_PASS(nng_socket_set_ms(req, NNG_OPT_RECVTIMEO, 1000));
+	NUTS_PASS(nng_socket_set_ms(rep, NNG_OPT_SENDTIMEO, 1000));
+	NUTS_PASS(nng_socket_set_ms(req, NNG_OPT_SENDTIMEO, 1000));
+	NUTS_PASS(nng_aio_alloc(&aio, NULL, NULL));
+	NUTS_PASS(nng_msg_alloc(&m, 10 << 20)); // 10 MB
+	NUTS_MARRY(req, rep);
+	char *body = nng_msg_body(m);
+
+	NUTS_ASSERT(nng_msg_len(m) == 10 << 20);
+	for (size_t i = 0; i < nng_msg_len(m); i++) {
+		body[i] = i % 16 + 'A';
+	}
+	NUTS_PASS(nng_msg_dup(&d, m));
+	NUTS_SEND(req, "R");
+	NUTS_RECV(rep, "R");
+	nng_aio_set_msg(aio, m);
+	nng_send_aio(rep, aio);
+	nng_aio_wait(aio);
+	NUTS_PASS(nng_aio_result(aio));
+	nng_aio_set_msg(aio, NULL);
+	m = NULL;
+	nng_recv_aio(req, aio);
+	nng_aio_wait(aio);
+	NUTS_PASS(nng_aio_result(aio));
+	m = nng_aio_get_msg(aio);
+	NUTS_ASSERT(m != NULL);
+	NUTS_ASSERT(nng_msg_len(m) == nng_msg_len(d));
+	NUTS_ASSERT(
+	    memcmp(nng_msg_body(m), nng_msg_body(d), nng_msg_len(m)) == 0);
+
+	// make sure other messages still flow afterwards
+	NUTS_SEND(req, "E");
+	NUTS_RECV(rep, "E");
+	NUTS_SEND(rep, "E");
+	NUTS_RECV(req, "E");
+
+	nng_aio_free(aio);
+	nng_msg_free(m);
+	nng_msg_free(d);
+	NUTS_CLOSE(rep);
+	NUTS_CLOSE(req);
+}
+
+void
+test_rep_huge_send_socket(void)
+{
+	nng_socket rep;
+	nng_socket req;
+	nng_msg   *m;
+	nng_msg   *d;
+	nng_aio   *aio;
+
+	NUTS_PASS(nng_rep_open(&rep));
+	NUTS_PASS(nng_req_open(&req));
+	NUTS_PASS(nng_socket_set_ms(rep, NNG_OPT_RECVTIMEO, 1000));
+	NUTS_PASS(nng_socket_set_ms(req, NNG_OPT_RECVTIMEO, 1000));
+	NUTS_PASS(nng_socket_set_ms(rep, NNG_OPT_SENDTIMEO, 1000));
+	NUTS_PASS(nng_socket_set_ms(req, NNG_OPT_SENDTIMEO, 1000));
+	NUTS_PASS(nng_aio_alloc(&aio, NULL, NULL));
+	NUTS_PASS(nng_msg_alloc(&m, 10 << 20)); // 10 MB
+	NUTS_PASS(nng_socket_set_size(req, NNG_OPT_RECVMAXSZ, 1 << 30));
+	NUTS_PASS(nng_socket_set_size(rep, NNG_OPT_RECVMAXSZ, 1 << 30));
+	NUTS_MARRY_EX(req, rep, "socket://", NULL, NULL);
+	char *body = nng_msg_body(m);
+
+	NUTS_ASSERT(nng_msg_len(m) == 10 << 20);
+	for (size_t i = 0; i < nng_msg_len(m); i++) {
+		body[i] = i % 16 + 'A';
+	}
+	NUTS_PASS(nng_msg_dup(&d, m));
+	NUTS_SEND(req, "R");
+	NUTS_RECV(rep, "R");
+	nng_aio_set_msg(aio, m);
+	nng_send_aio(rep, aio);
+	nng_aio_wait(aio);
+	NUTS_PASS(nng_aio_result(aio));
+	nng_aio_set_msg(aio, NULL);
+	m = NULL;
+	nng_recv_aio(req, aio);
+	nng_aio_wait(aio);
+	NUTS_PASS(nng_aio_result(aio));
+	m = nng_aio_get_msg(aio);
+	NUTS_ASSERT(m != NULL);
+	NUTS_ASSERT(nng_msg_len(m) == nng_msg_len(d));
+	NUTS_ASSERT(
+	    memcmp(nng_msg_body(m), nng_msg_body(d), nng_msg_len(m)) == 0);
+
+	// make sure other messages still flow afterwards
+	NUTS_SEND(req, "E");
+	NUTS_RECV(rep, "E");
+	NUTS_SEND(rep, "E");
+	NUTS_RECV(req, "E");
+
+	nng_aio_free(aio);
+	nng_msg_free(m);
+	nng_msg_free(d);
+	NUTS_CLOSE(rep);
+	NUTS_CLOSE(req);
 }
 
 void
@@ -191,8 +288,8 @@ test_rep_close_pipe_before_send(void)
 	nng_socket rep;
 	nng_socket req;
 	nng_pipe   p;
-	nng_aio *  aio1;
-	nng_msg *  m;
+	nng_aio   *aio1;
+	nng_msg   *m;
 
 	NUTS_PASS(nng_rep0_open(&rep));
 	NUTS_PASS(nng_req0_open(&req));
@@ -223,7 +320,7 @@ test_rep_close_pipe_during_send(void)
 	nng_socket rep;
 	nng_socket req;
 	nng_pipe   p = NNG_PIPE_INITIALIZER;
-	nng_msg *  m;
+	nng_msg   *m;
 
 	NUTS_PASS(nng_rep0_open(&rep));
 	NUTS_PASS(nng_req0_open_raw(&req));
@@ -263,7 +360,7 @@ test_rep_ctx_recv_aio_stopped(void)
 {
 	nng_socket rep;
 	nng_ctx    ctx;
-	nng_aio *  aio;
+	nng_aio   *aio;
 
 	NUTS_PASS(nng_rep0_open(&rep));
 	NUTS_PASS(nng_aio_alloc(&aio, NULL, NULL));
@@ -284,9 +381,9 @@ test_rep_close_pipe_context_send(void)
 	nng_socket rep;
 	nng_socket req;
 	nng_pipe   p = NNG_PIPE_INITIALIZER;
-	nng_msg *  m;
+	nng_msg   *m;
 	nng_ctx    ctx[100];
-	nng_aio *  aio[100];
+	nng_aio   *aio[100];
 	int        i;
 
 	NUTS_PASS(nng_rep0_open(&rep));
@@ -343,9 +440,9 @@ test_rep_close_context_send(void)
 {
 	nng_socket rep;
 	nng_socket req;
-	nng_msg *  m;
+	nng_msg   *m;
 	nng_ctx    ctx[100];
-	nng_aio *  aio[100];
+	nng_aio   *aio[100];
 	int        i;
 
 	NUTS_PASS(nng_rep0_open(&rep));
@@ -399,7 +496,7 @@ test_rep_close_recv(void)
 {
 	nng_socket rep;
 	nng_socket req;
-	nng_aio *  aio;
+	nng_aio   *aio;
 
 	NUTS_PASS(nng_rep0_open(&rep));
 	NUTS_PASS(nng_req0_open_raw(&req));
@@ -420,7 +517,7 @@ test_rep_close_recv(void)
 struct rep_close_recv_cb_state {
 	nng_aio *aio;
 	nng_mtx *mtx;
-	nng_cv * cv;
+	nng_cv  *cv;
 	int      done;
 	int      result;
 	nng_msg *msg;
@@ -479,7 +576,7 @@ test_rep_ctx_recv_nonblock(void)
 {
 	nng_socket rep;
 	nng_ctx    ctx;
-	nng_aio *  aio;
+	nng_aio   *aio;
 
 	NUTS_PASS(nng_rep0_open(&rep));
 	NUTS_PASS(nng_ctx_open(&ctx, rep));
@@ -500,8 +597,8 @@ test_rep_ctx_send_nonblock(void)
 	nng_socket rep;
 	nng_socket req;
 	nng_ctx    ctx;
-	nng_aio *  aio;
-	nng_msg *  msg;
+	nng_aio   *aio;
+	nng_msg   *msg;
 
 	NUTS_PASS(nng_req0_open(&req));
 	NUTS_PASS(nng_rep0_open(&rep));
@@ -535,7 +632,7 @@ test_rep_ctx_send_nonblock2(void)
 	nng_socket rep;
 	nng_socket req;
 	nng_ctx    rep_ctx[10];
-	nng_aio *  rep_aio[10];
+	nng_aio   *rep_aio[10];
 	int        num_good = 0;
 	int        num_fail = 0;
 
@@ -626,7 +723,7 @@ test_rep_recv_garbage(void)
 {
 	nng_socket rep;
 	nng_socket req;
-	nng_msg *  m;
+	nng_msg   *m;
 
 	NUTS_PASS(nng_rep0_open(&rep));
 	NUTS_PASS(nng_req0_open_raw(&req));
@@ -650,8 +747,9 @@ NUTS_TESTS = {
 	{ "rep send bad state", test_rep_send_bad_state },
 	{ "rep poll readable", test_rep_poll_readable },
 	{ "rep poll writable", test_rep_poll_writeable },
-	{ "rep context does not poll", test_rep_context_no_poll },
 	{ "rep validate peer", test_rep_validate_peer },
+	{ "rep huge send", test_rep_huge_send },
+	{ "rep huge send socket", test_rep_huge_send_socket },
 	{ "rep double recv", test_rep_double_recv },
 	{ "rep send nonblock", test_rep_send_nonblock },
 	{ "rep close pipe before send", test_rep_close_pipe_before_send },

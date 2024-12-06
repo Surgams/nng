@@ -1,5 +1,5 @@
 //
-// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2024 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -265,12 +265,18 @@ pair1_pipe_start(void *arg)
 	if (nni_pipe_peer(p->pipe) != NNG_PAIR1_PEER) {
 		BUMP_STAT(&s->stat_reject_mismatch);
 		// Peer protocol mismatch.
+		nng_log_warn("NNG-PEER-MISMATCH",
+		    "Peer protocol mismatch: %d != %d, rejected.",
+		    nni_pipe_peer(p->pipe), NNG_PAIR1_PEER);
 		return (NNG_EPROTO);
 	}
 
 	nni_mtx_lock(&s->mtx);
 	if (s->p != NULL) {
 		nni_mtx_unlock(&s->mtx);
+		nng_log_warn("NNG-PAIR-BUSY",
+		    "Peer pipe protocol %d is already paired, rejected.",
+		    nni_pipe_peer(p->pipe));
 		BUMP_STAT(&s->stat_reject_already);
 		return (NNG_EBUSY);
 	}
@@ -498,7 +504,7 @@ pair1_pipe_send(pair1_pipe *p, nni_msg *m)
 	// assumption: we have unique access to the message at this point.
 	NNI_ASSERT(!nni_msg_shared(m));
 
-#if NNG_TEST_LIB
+#ifdef NNG_TEST_LIB
 	if (s->inject_header) {
 		goto inject;
 	}
@@ -506,7 +512,7 @@ pair1_pipe_send(pair1_pipe *p, nni_msg *m)
 	NNI_ASSERT(nni_msg_header_len(m) == sizeof(uint32_t));
 	nni_msg_header_poke_u32(m, nni_msg_header_peek_u32(m) + 1);
 
-#if NNG_TEST_LIB
+#ifdef NNG_TEST_LIB
 inject:
 #endif
 
@@ -531,7 +537,7 @@ pair1_sock_send(void *arg, nni_aio *aio)
 		return;
 	}
 
-#if NNG_TEST_LIB
+#ifdef NNG_TEST_LIB
 	if (s->inject_header) {
 		goto inject;
 	}
@@ -554,7 +560,7 @@ pair1_sock_send(void *arg, nni_aio *aio)
 		nni_msg_header_append_u32(m, 0);
 	}
 
-#if NNG_TEST_LIB
+#ifdef NNG_TEST_LIB
 inject:
 #endif
 
@@ -718,29 +724,19 @@ pair1_get_recv_buf_len(void *arg, void *buf, size_t *szp, nni_opt_type t)
 }
 
 static int
-pair1_sock_get_recv_fd(void *arg, void *buf, size_t *szp, nni_opt_type t)
+pair1_sock_get_recv_fd(void *arg, int *fdp)
 {
 	pair1_sock *s = arg;
-	int         rv;
-	int         fd;
 
-	if ((rv = nni_pollable_getfd(&s->readable, &fd)) != 0) {
-		return (rv);
-	}
-	return (nni_copyout_int(fd, buf, szp, t));
+	return (nni_pollable_getfd(&s->readable, fdp));
 }
 
 static int
-pair1_sock_get_send_fd(void *arg, void *buf, size_t *szp, nni_opt_type t)
+pair1_sock_get_send_fd(void *arg, int *fdp)
 {
 	pair1_sock *s = arg;
-	int         rv;
-	int         fd;
 
-	if ((rv = nni_pollable_getfd(&s->writable, &fd)) != 0) {
-		return (rv);
-	}
-	return (nni_copyout_int(fd, buf, szp, t));
+	return (nni_pollable_getfd(&s->writable, fdp));
 }
 
 static nni_proto_pipe_ops pair1_pipe_ops = {
@@ -757,14 +753,6 @@ static nni_option pair1_sock_options[] = {
 	    .o_name = NNG_OPT_MAXTTL,
 	    .o_get  = pair1_sock_get_max_ttl,
 	    .o_set  = pair1_sock_set_max_ttl,
-	},
-	{
-	    .o_name = NNG_OPT_RECVFD,
-	    .o_get  = pair1_sock_get_recv_fd,
-	},
-	{
-	    .o_name = NNG_OPT_SENDFD,
-	    .o_get  = pair1_sock_get_send_fd,
 	},
 	{
 	    .o_name = NNG_OPT_SENDBUF,
@@ -791,14 +779,16 @@ static nni_option pair1_sock_options[] = {
 };
 
 static nni_proto_sock_ops pair1_sock_ops = {
-	.sock_size    = sizeof(pair1_sock),
-	.sock_init    = pair1_sock_init,
-	.sock_fini    = pair1_sock_fini,
-	.sock_open    = pair1_sock_open,
-	.sock_close   = pair1_sock_close,
-	.sock_recv    = pair1_sock_recv,
-	.sock_send    = pair1_sock_send,
-	.sock_options = pair1_sock_options,
+	.sock_size         = sizeof(pair1_sock),
+	.sock_init         = pair1_sock_init,
+	.sock_fini         = pair1_sock_fini,
+	.sock_open         = pair1_sock_open,
+	.sock_close        = pair1_sock_close,
+	.sock_recv         = pair1_sock_recv,
+	.sock_send         = pair1_sock_send,
+	.sock_recv_poll_fd = pair1_sock_get_recv_fd,
+	.sock_send_poll_fd = pair1_sock_get_send_fd,
+	.sock_options      = pair1_sock_options,
 };
 
 static nni_proto pair1_proto = {
@@ -817,14 +807,16 @@ nng_pair1_open(nng_socket *sock)
 }
 
 static nni_proto_sock_ops pair1_sock_ops_raw = {
-	.sock_size    = sizeof(pair1_sock),
-	.sock_init    = pair1_sock_init_raw,
-	.sock_fini    = pair1_sock_fini,
-	.sock_open    = pair1_sock_open,
-	.sock_close   = pair1_sock_close,
-	.sock_recv    = pair1_sock_recv,
-	.sock_send    = pair1_sock_send,
-	.sock_options = pair1_sock_options,
+	.sock_size         = sizeof(pair1_sock),
+	.sock_init         = pair1_sock_init_raw,
+	.sock_fini         = pair1_sock_fini,
+	.sock_open         = pair1_sock_open,
+	.sock_close        = pair1_sock_close,
+	.sock_recv         = pair1_sock_recv,
+	.sock_send         = pair1_sock_send,
+	.sock_recv_poll_fd = pair1_sock_get_recv_fd,
+	.sock_send_poll_fd = pair1_sock_get_send_fd,
+	.sock_options      = pair1_sock_options,
 };
 
 static nni_proto pair1_proto_raw = {

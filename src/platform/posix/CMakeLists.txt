@@ -1,5 +1,5 @@
 #
-# Copyright 2020 Staysail Systems, Inc. <info@staystail.tech>
+# Copyright 2023 Staysail Systems, Inc. <info@staystail.tech>
 #
 # This software is supplied under the terms of the MIT License, a
 # copy of which should be located in the distribution where this
@@ -26,10 +26,16 @@ if (NNG_PLATFORM_POSIX)
 
     nng_check_func(lockf NNG_HAVE_LOCKF)
     nng_check_func(flock NNG_HAVE_FLOCK)
+    nng_check_func(getentropy NNG_HAVE_GETENTROPY)
     nng_check_func(getrandom NNG_HAVE_GETRANDOM)
     nng_check_func(arc4random_buf NNG_HAVE_ARC4RANDOM)
 
-    nng_check_lib(rt clock_gettime NNG_HAVE_CLOCK_GETTIME)
+    nng_check_func(clock_gettime NNG_HAVE_CLOCK_GETTIME_LIBC)
+    if (NNG_HAVE_CLOCK_GETTIME_LIBC)
+        nng_defines_if(NNG_HAVE_CLOCK_GETTIME_LIBC NNG_HAVE_CLOCK_GETTIME)
+    else()
+        nng_check_lib(rt clock_gettime NNG_HAVE_CLOCK_GETTIME)
+    endif()
     nng_check_lib(pthread sem_wait NNG_HAVE_SEMAPHORE_PTHREAD)
     nng_check_lib(pthread pthread_atfork NNG_HAVE_PTHREAD_ATFORK_PTHREAD)
     nng_check_lib(pthread pthread_set_name_np NNG_HAVE_PTHREAD_SET_NAME_NP)
@@ -61,6 +67,10 @@ if (NNG_PLATFORM_POSIX)
     nng_check_sym(LOCAL_PEERPID sys/un.h NNG_HAVE_LOCALPEERPID)
     nng_check_sym(getpeerucred ucred.h NNG_HAVE_GETPEERUCRED)
     nng_check_sym(atomic_flag_test_and_set stdatomic.h NNG_HAVE_STDATOMIC)
+    nng_check_sym(socketpair sys/socket.h NNG_HAVE_SOCKETPAIR)
+    nng_check_sym(AF_INET6 netinet/in.h NNG_HAVE_INET6)
+    nng_check_sym(timespec_get time.h NNG_HAVE_TIMESPEC_GET)
+    nng_check_sym(getentropy sys/random.h NNG_HAVE_SYS_RANDOM)
 
     nng_sources(
             posix_impl.h
@@ -78,9 +88,12 @@ if (NNG_PLATFORM_POSIX)
             posix_ipcconn.c
             posix_ipcdial.c
             posix_ipclisten.c
+            posix_peerid.c
             posix_pipe.c
             posix_resolv_gai.c
             posix_sockaddr.c
+            posix_socketpair.c
+            posix_sockfd.c
             posix_tcpconn.c
             posix_tcpdial.c
             posix_tcplisten.c
@@ -100,6 +113,8 @@ if (NNG_PLATFORM_POSIX)
 
     if (NNG_HAVE_ARC4RANDOM)
         nng_sources(posix_rand_arc4random.c)
+    elseif (NNG_HAVE_GETENTROPY)
+        nng_sources(posix_rand_getentropy.c)
     elseif (NNG_HAVE_GETRANDOM)
         nng_sources(posix_rand_getrandom.c)
     else ()

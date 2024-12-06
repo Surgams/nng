@@ -1,5 +1,5 @@
 #
-# Copyright 2020 Staysail Systems, Inc. <info@staysail.tech>
+# Copyright 2024 Staysail Systems, Inc. <info@staysail.tech>
 #
 # This software is supplied under the terms of the MIT License, a
 # copy of which should be located in the distribution where this
@@ -101,6 +101,11 @@ if (NNG_ENABLE_HTTP)
 endif()
 mark_as_advanced(NNG_ENABLE_HTTP)
 
+# Some sites or kernels lack IPv6 support.  This override allows us
+# to prevent the use of IPv6 in environments where it isn't supported.
+option (NNG_ENABLE_IPV6 "Enable IPv6." ON)
+mark_as_advanced(NNG_ENABLE_IPV6)
+
 #
 # Transport Options.
 #
@@ -126,6 +131,12 @@ mark_as_advanced(NNG_TRANSPORT_WS)
 CMAKE_DEPENDENT_OPTION(NNG_TRANSPORT_WSS "Enable WSS transport." ON
         "NNG_ENABLE_TLS" OFF)
 mark_as_advanced(NNG_TRANSPORT_WSS)
+
+option (NNG_TRANSPORT_FDC "Enable File Descriptor transport (EXPERIMENTAL)" ON)
+mark_as_advanced(NNG_TRANSPORT_FDC)
+
+option (NNG_TRANSPORT_UDP "Enable UDP transport (EXPERIMENTAL)" ON)
+mark_as_advanced(NNG_TRANSPORT_UDP)
 
 # ZeroTier
 option (NNG_TRANSPORT_ZEROTIER "Enable ZeroTier transport (requires libzerotiercore)." OFF)

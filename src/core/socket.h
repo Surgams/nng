@@ -1,5 +1,5 @@
 //
-// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2024 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -22,10 +22,13 @@ extern uint16_t    nni_sock_proto_id(nni_sock *);
 extern uint16_t    nni_sock_peer_id(nni_sock *);
 extern const char *nni_sock_proto_name(nni_sock *);
 extern const char *nni_sock_peer_name(nni_sock *);
+extern bool        nni_sock_raw(nni_sock *);
 extern void       *nni_sock_proto_data(nni_sock *);
 extern void        nni_sock_add_stat(nni_sock *, nni_stat_item *);
 
+extern struct nni_proto_sock_ops *nni_sock_proto_ops(nni_sock *);
 extern struct nni_proto_pipe_ops *nni_sock_proto_pipe_ops(nni_sock *);
+extern struct nni_proto_ctx_ops  *nni_ctx_proto_ops(nni_ctx *);
 
 extern int nni_sock_setopt(
     nni_sock *, const char *, const void *, size_t, nni_opt_type);
@@ -34,6 +37,8 @@ extern int nni_sock_getopt(
 extern void     nni_sock_send(nni_sock *, nni_aio *);
 extern void     nni_sock_recv(nni_sock *, nni_aio *);
 extern uint32_t nni_sock_id(nni_sock *);
+extern int      nni_sock_get_send_fd(nni_sock *s, int *fdp);
+extern int      nni_sock_get_recv_fd(nni_sock *s, int *fdp);
 
 // These are socket methods that protocol operations can expect to call.
 // Note that each of these should be called without any locks held, since
@@ -73,6 +78,8 @@ extern int nni_ctx_open(nni_ctx **, nni_sock *);
 // (If the socket for the context is being closed, then this will return
 // NNG_ECLOSED unless the final argument is true.)
 extern int nni_ctx_find(nni_ctx **, uint32_t, bool);
+
+extern void *nni_ctx_proto_data(nni_ctx *);
 
 // nni_ctx_rele is called to release a hold on the context.  These holds
 // are acquired by either nni_ctx_open or nni_ctx_find.  If the context

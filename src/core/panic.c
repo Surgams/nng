@@ -23,7 +23,7 @@
 void
 nni_show_backtrace(void)
 {
-#if NNG_HAVE_BACKTRACE
+#ifdef NNG_HAVE_BACKTRACE
 	void *frames[50];
 	int   nframes;
 
@@ -69,6 +69,5 @@ nni_panic(const char *fmt, ...)
 void
 nni_println(const char *msg)
 {
-	// TODO: support redirection of this later.
-	nni_plat_println(msg);
+	nni_plat_printf("%s\n", msg);
 }

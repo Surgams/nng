@@ -1,5 +1,5 @@
 //
-// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2024 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 // Copyright 2018 Devolutions <info@devolutions.net>
 //
@@ -46,11 +46,6 @@
 // nni_plat_abort crashes the system; it should do whatever is appropriate
 // for abnormal programs on the platform, such as calling abort().
 extern void nni_plat_abort(void);
-
-// nni_plat_println is used to emit debug messages.  Typically this is used
-// during core debugging, or to emit panic messages.  Message content will
-// not contain newlines, but the output will add them.
-extern void nni_plat_println(const char *);
 
 // nni_plat_printf is like printf.  It should conform to C99 standard printf,
 // but is a function to allow platform ports to redirect.  It should go to
@@ -234,8 +229,8 @@ extern bool nni_atomic_cas(nni_atomic_int *, int, int);
 
 // atomic pointers.  We only support a few operations.
 typedef struct nni_atomic_ptr nni_atomic_ptr;
-extern void nni_atomic_set_ptr(nni_atomic_ptr *, void *);
-extern void *nni_atomic_get_ptr(nni_atomic_ptr *);
+extern void                   nni_atomic_set_ptr(nni_atomic_ptr *, void *);
+extern void                  *nni_atomic_get_ptr(nni_atomic_ptr *);
 
 //
 // Clock Support
@@ -249,6 +244,9 @@ extern void *nni_atomic_get_ptr(nni_atomic_ptr *);
 // option of using negative values for other purposes in the future.)
 extern nni_time nni_clock(void);
 
+// Get the real time, in seconds and nanoseconds
+extern int nni_time_get(uint64_t *seconds, uint32_t *nanoseconds);
+
 // nni_msleep sleeps for the specified number of milliseconds (at least).
 extern void nni_msleep(nni_duration);
 
@@ -260,18 +258,10 @@ extern void nni_msleep(nni_duration);
 uint32_t nni_random(void);
 
 // nni_plat_init is called to allow the platform the chance to
-// do any necessary initialization.  This routine MUST be idempotent,
-// and thread-safe, and will be called before any other API calls, and
-// may be called at any point thereafter.  It is permitted to return
-// an error if some critical failure initializing the platform occurs,
-// but once this succeeds, all future calls must succeed as well, unless
-// nni_plat_fini has been called.
-//
-// The function argument should be called if the platform has not initialized
-// (i.e. exactly once), and its result passed back to the caller.  If it
-// does not return 0 (success), then it may be called again to try to
-// initialize the platform again at a later date.
-extern int nni_plat_init(int (*)(void));
+// do any necessary initialization.  This will be called before any other API
+// calls. It is permitted to return an error if some critical failure
+// initializing the platform occurs.
+extern int nni_plat_init(nng_init_params *);
 
 // nni_plat_fini is called to clean up resources.  It is intended to
 // be called as the last thing executed in the library, and no other functions
@@ -353,13 +343,17 @@ extern int nni_tcp_listener_get(
 // Symbolic service names will be looked up assuming SOCK_STREAM, so
 // they may not work with UDP.
 extern void nni_resolv_ip(
-    const char *, const char *, int, bool, nng_sockaddr *sa, nni_aio *);
+    const char *, uint16_t, int, bool, nng_sockaddr *sa, nni_aio *);
 
 // nni_parse_ip parses an IP address, without a port.
 extern int nni_parse_ip(const char *, nng_sockaddr *);
 
 // nni_parse_ip_port parses an IP address with an optional port appended.
 extern int nni_parse_ip_port(const char *, nng_sockaddr *);
+
+// nni_get_port_by_name resolves a name (which may be an ASCII representation
+// of a number) to a port number (the value returned is in native byte order.)
+extern int nni_get_port_by_name(const char *, uint32_t *);
 
 //
 // IPC (UNIX Domain Sockets & Named Pipes) Support.
@@ -386,9 +380,9 @@ extern int nni_ipc_listener_alloc(nng_stream_listener **, const nng_url *);
 typedef struct nni_plat_udp nni_plat_udp;
 
 // nni_plat_udp_open initializes a UDP socket, binding to the local
-// address specified specified in the AIO.  The remote address is
+// address specified in the AIO.  The remote address is
 // not used.  The resulting nni_plat_udp structure is returned in the
-// the aio's a_pipe.
+// aio's a_pipe.
 extern int nni_plat_udp_open(nni_plat_udp **, nni_sockaddr *);
 
 // nni_plat_udp_close closes the underlying UDP socket.
@@ -403,6 +397,10 @@ extern void nni_plat_udp_send(nni_plat_udp *, nni_aio *);
 // from the UDP payload.  If the UDP payload will not fit, then
 // NNG_EMSGSIZE results.
 extern void nni_plat_udp_recv(nni_plat_udp *, nni_aio *);
+
+// nni_plat_udp_membership provides for joining or leaving multicast groups.
+extern int nni_plat_udp_multicast_membership(
+    nni_plat_udp *udp, nni_sockaddr *sa, bool join);
 
 //
 // Notification Pipe Pairs
@@ -433,6 +431,19 @@ extern void nni_plat_pipe_clear(int);
 extern void nni_plat_pipe_close(int, int);
 
 extern int nni_plat_udp_sockname(nni_plat_udp *, nni_sockaddr *);
+
+// nni_socket_pair is used to create a socket pair using socketpair()
+// on POSIX systems.  (Windows might provide a similar solution, using
+// AF_UNIX at some point, in which case the arguments will actually be
+// an array of HANDLEs.)  If not supported, this returns NNG_ENOTSUP.
+//
+// This API can only create a pair of open file descriptors, suitable for use
+// with the socket transport, each bound to the other.  The transport must be
+// a bidirectional reliable byte stream.  This should be suitable for use
+// in APIs to transport file descriptors, or across a fork/exec boundary (so
+// that child processes may use these with socket to inherit a socket that is
+// connected to the parent.)
+extern int nni_socket_pair(int[2]);
 
 //
 // File/Store Support

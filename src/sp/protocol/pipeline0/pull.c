@@ -1,5 +1,5 @@
 //
-// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2024 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -39,9 +39,9 @@ struct pull0_sock {
 
 // pull0_pipe is our per-pipe protocol private structure.
 struct pull0_pipe {
-	nni_pipe *    p;
-	pull0_sock *  s;
-	nni_msg *     m;
+	nni_pipe     *p;
+	pull0_sock   *s;
+	nni_msg      *m;
 	nni_aio       aio;
 	bool          closed;
 	nni_list_node node;
@@ -104,6 +104,9 @@ pull0_pipe_start(void *arg)
 
 	if (nni_pipe_peer(p->p) != NNI_PROTO_PUSH_V0) {
 		// Peer protocol mismatch.
+		nng_log_warn("NNG-PEER-MISMATCH",
+		    "Peer protocol mismatch: %d != %d, rejected.",
+		    nni_pipe_peer(p->p), NNI_PROTO_PUSH_V0);
 		return (NNG_EPROTO);
 	}
 
@@ -137,9 +140,9 @@ pull0_recv_cb(void *arg)
 {
 	pull0_pipe *p  = arg;
 	pull0_sock *s  = p->s;
-	nni_aio *   ap = &p->aio;
-	nni_aio *   as;
-	nni_msg *   m;
+	nni_aio    *ap = &p->aio;
+	nni_aio    *as;
+	nni_msg    *m;
 
 	if (nni_aio_result(ap) != 0) {
 		// Failed to get a message, probably the pipe is closed.
@@ -185,7 +188,7 @@ static void
 pull0_sock_close(void *arg)
 {
 	pull0_sock *s = arg;
-	nni_aio *   a;
+	nni_aio    *a;
 	nni_mtx_lock(&s->m);
 	while ((a = nni_list_first(&s->rq)) != NULL) {
 		nni_aio_list_remove(a);
@@ -250,23 +253,14 @@ pull0_sock_recv(void *arg, nni_aio *aio)
 }
 
 static int
-pull0_sock_get_recv_fd(void *arg, void *buf, size_t *szp, nni_opt_type t)
+pull0_sock_get_recv_fd(void *arg, int *fdp)
 {
 	pull0_sock *s = arg;
-	int         rv;
-	int         fd;
 
-	if ((rv = nni_pollable_getfd(&s->readable, &fd)) != 0) {
-		return (rv);
-	}
-	return (nni_copyout_int(fd, buf, szp, t));
+	return (nni_pollable_getfd(&s->readable, fdp));
 }
 
 static nni_option pull0_sock_options[] = {
-	{
-	    .o_name = NNG_OPT_RECVFD,
-	    .o_get  = pull0_sock_get_recv_fd,
-	},
 	// terminate list
 	{
 	    .o_name = NULL,
@@ -283,14 +277,15 @@ static nni_proto_pipe_ops pull0_pipe_ops = {
 };
 
 static nni_proto_sock_ops pull0_sock_ops = {
-	.sock_size    = sizeof(pull0_sock),
-	.sock_init    = pull0_sock_init,
-	.sock_fini    = pull0_sock_fini,
-	.sock_open    = pull0_sock_open,
-	.sock_close   = pull0_sock_close,
-	.sock_send    = pull0_sock_send,
-	.sock_recv    = pull0_sock_recv,
-	.sock_options = pull0_sock_options,
+	.sock_size         = sizeof(pull0_sock),
+	.sock_init         = pull0_sock_init,
+	.sock_fini         = pull0_sock_fini,
+	.sock_open         = pull0_sock_open,
+	.sock_close        = pull0_sock_close,
+	.sock_send         = pull0_sock_send,
+	.sock_recv         = pull0_sock_recv,
+	.sock_recv_poll_fd = pull0_sock_get_recv_fd,
+	.sock_options      = pull0_sock_options,
 };
 
 static nni_proto pull0_proto = {

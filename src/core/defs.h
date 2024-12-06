@@ -11,7 +11,10 @@
 #ifndef CORE_DEFS_H
 #define CORE_DEFS_H
 
+#include <stdbool.h>
 #include <stdint.h>
+
+#include <nng/nng.h>
 
 // C compilers may get unhappy when named arguments are not used.  While
 // there are things like __attribute__((unused)) which are arguably
@@ -23,7 +26,7 @@
 	if (!(x))     \
 	nni_panic("%s: %d: assert err: %s", __FILE__, __LINE__, #x)
 #else
-#define NNI_ASSERT(x) ((void)(0))
+#define NNI_ASSERT(x) ((void) (0))
 #endif
 
 // Returns the size of an array in elements. (Convenience.)
@@ -33,7 +36,6 @@
 // Internal code should use these names when possible.
 typedef nng_msg      nni_msg;
 typedef nng_sockaddr nni_sockaddr;
-typedef nng_url      nni_url;
 typedef nng_iov      nni_iov;
 typedef nng_aio      nni_aio;
 
@@ -101,25 +103,73 @@ typedef void (*nni_cb)(void *);
 		(ptr)[7] = (uint8_t) ((uint64_t) (u));          \
 	} while (0)
 
-#define NNI_GET16(ptr, v)                               \
-	v = (((uint16_t) ((uint8_t) (ptr)[0])) << 8u) + \
-	    (((uint16_t) (uint8_t) (ptr)[1]))
+#define NNI_GET16(ptr, v)                                   \
+	v = (((uint16_t) (((uint8_t *) (ptr))[0])) << 8u) + \
+	    ((uint16_t) ((uint8_t *) (ptr))[1])
 
-#define NNI_GET32(ptr, v)                                \
-	v = (((uint32_t) ((uint8_t) (ptr)[0])) << 24u) + \
-	    (((uint32_t) ((uint8_t) (ptr)[1])) << 16u) + \
-	    (((uint32_t) ((uint8_t) (ptr)[2])) << 8u) +  \
-	    (((uint32_t) (uint8_t) (ptr)[3]))
+#define NNI_GET32(ptr, v)                                  \
+	v = (((uint32_t) ((uint8_t *) (ptr))[0]) << 24u) + \
+	    (((uint32_t) ((uint8_t *) (ptr))[1]) << 16u) + \
+	    (((uint32_t) ((uint8_t *) (ptr))[2]) << 8u) +  \
+	    ((uint32_t) ((uint8_t *) (ptr))[3])
 
-#define NNI_GET64(ptr, v)                                \
-	v = (((uint64_t) ((uint8_t) (ptr)[0])) << 56u) + \
-	    (((uint64_t) ((uint8_t) (ptr)[1])) << 48u) + \
-	    (((uint64_t) ((uint8_t) (ptr)[2])) << 40u) + \
-	    (((uint64_t) ((uint8_t) (ptr)[3])) << 32u) + \
-	    (((uint64_t) ((uint8_t) (ptr)[4])) << 24u) + \
-	    (((uint64_t) ((uint8_t) (ptr)[5])) << 16u) + \
-	    (((uint64_t) ((uint8_t) (ptr)[6])) << 8u) +  \
-	    (((uint64_t) (uint8_t) (ptr)[7]))
+#define NNI_GET64(ptr, v)                                  \
+	v = (((uint64_t) ((uint8_t *) (ptr))[0]) << 56u) + \
+	    (((uint64_t) ((uint8_t *) (ptr))[1]) << 48u) + \
+	    (((uint64_t) ((uint8_t *) (ptr))[2]) << 40u) + \
+	    (((uint64_t) ((uint8_t *) (ptr))[3]) << 32u) + \
+	    (((uint64_t) ((uint8_t *) (ptr))[4]) << 24u) + \
+	    (((uint64_t) ((uint8_t *) (ptr))[5]) << 16u) + \
+	    (((uint64_t) ((uint8_t *) (ptr))[6]) << 8u) +  \
+	    ((uint64_t) ((uint8_t *) (ptr))[7])
+
+// Modern CPUs are all little endian.  Let's stop paying the endian tax.
+
+#define NNI_PUT16LE(ptr, u)                                    \
+	do {                                                   \
+		(ptr)[1] = (uint8_t) (((uint16_t) (u)) >> 8u); \
+		(ptr)[0] = (uint8_t) ((uint16_t) (u));         \
+	} while (0)
+
+#define NNI_PUT32LE(ptr, u)                                     \
+	do {                                                    \
+		(ptr)[3] = (uint8_t) (((uint32_t) (u)) >> 24u); \
+		(ptr)[2] = (uint8_t) (((uint32_t) (u)) >> 16u); \
+		(ptr)[1] = (uint8_t) (((uint32_t) (u)) >> 8u);  \
+		(ptr)[0] = (uint8_t) ((uint32_t) (u));          \
+	} while (0)
+
+#define NNI_PUT64LE(ptr, u)                                     \
+	do {                                                    \
+		(ptr)[7] = (uint8_t) (((uint64_t) (u)) >> 56u); \
+		(ptr)[6] = (uint8_t) (((uint64_t) (u)) >> 48u); \
+		(ptr)[5] = (uint8_t) (((uint64_t) (u)) >> 40u); \
+		(ptr)[4] = (uint8_t) (((uint64_t) (u)) >> 32u); \
+		(ptr)[3] = (uint8_t) (((uint64_t) (u)) >> 24u); \
+		(ptr)[2] = (uint8_t) (((uint64_t) (u)) >> 16u); \
+		(ptr)[1] = (uint8_t) (((uint64_t) (u)) >> 8u);  \
+		(ptr)[0] = (uint8_t) ((uint64_t) (u));          \
+	} while (0)
+
+#define NNI_GET16LE(ptr, v)                             \
+	v = (((uint16_t) ((uint8_t) (ptr)[1])) << 8u) + \
+	    (((uint16_t) (uint8_t) (ptr)[0]))
+
+#define NNI_GET32LE(ptr, v)                              \
+	v = (((uint32_t) ((uint8_t) (ptr)[3])) << 24u) + \
+	    (((uint32_t) ((uint8_t) (ptr)[2])) << 16u) + \
+	    (((uint32_t) ((uint8_t) (ptr)[1])) << 8u) +  \
+	    (((uint32_t) (uint8_t) (ptr)[0]))
+
+#define NNI_GET64LE(ptr, v)                              \
+	v = (((uint64_t) ((uint8_t) (ptr)[7])) << 56u) + \
+	    (((uint64_t) ((uint8_t) (ptr)[6])) << 48u) + \
+	    (((uint64_t) ((uint8_t) (ptr)[5])) << 40u) + \
+	    (((uint64_t) ((uint8_t) (ptr)[4])) << 32u) + \
+	    (((uint64_t) ((uint8_t) (ptr)[3])) << 24u) + \
+	    (((uint64_t) ((uint8_t) (ptr)[2])) << 16u) + \
+	    (((uint64_t) ((uint8_t) (ptr)[1])) << 8u) +  \
+	    (((uint64_t) (uint8_t) (ptr)[0]))
 
 // This increments a pointer a fixed number of byte cells.
 #define NNI_INCPTR(ptr, n) ((ptr) = (void *) ((char *) (ptr) + (n)))
@@ -136,17 +186,14 @@ typedef void (*nni_cb)(void *);
 // Types.  These are used to provide more structured access to options
 // (and maybe later statistics).  For now these are internal only.
 typedef enum {
-	NNI_TYPE_OPAQUE,
+	NNI_TYPE_NONE, // DO NOT USE
 	NNI_TYPE_BOOL,
 	NNI_TYPE_INT32,
-	NNI_TYPE_UINT32,
-	NNI_TYPE_INT64,
 	NNI_TYPE_UINT64,
 	NNI_TYPE_SIZE,
 	NNI_TYPE_DURATION,
 	NNI_TYPE_STRING,
 	NNI_TYPE_SOCKADDR,
-	NNI_TYPE_POINTER,
 } nni_type;
 
 typedef nni_type nni_opt_type;
@@ -177,5 +224,20 @@ typedef nni_type nni_opt_type;
 #define NNI_GCC_VERSION \
 	(__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__)
 #endif
+
+#if !defined(NNG_BIG_ENDIAN) && !defined(NNG_LITTLE_ENDIAN)
+#if defined(__BYTE_ORDER__)
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#define NNG_BIG_ENDIAN 1
+#elif __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+#define NNG_LITTLE_ENDIAN 1
+#else // middle-endian? (aka PDP-11)
+#error "Unsupported or unknown endian"
+#endif // __BYTE_ORDER__
+#else  // defined(__BYTE_ORDER__)
+#define NNG_LITTLE_ENDIAN 1
+#error "Unknown endian: specify -DNNG_BIG_ENDIAN=1 or -DNNG_LITTLE_ENDIAN=1"
+#endif // defined(__BYTE_ORDER)
+#endif // defined() endianness
 
 #endif // CORE_DEFS_H

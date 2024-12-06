@@ -1,5 +1,5 @@
 //
-// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2024 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 // Copyright 2019 Devolutions <info@devolutions.net>
 //
@@ -14,8 +14,8 @@
 
 #include "core/nng_impl.h"
 
+#include "nng/nng.h"
 #include "nng/supplemental/tls/tls.h"
-#include "nng/transport/tls/tls.h"
 
 // TLS over TCP transport.   Platform specific TCP operations must be
 // supplied as well, and uses the supplemental TLS v1.2 code.  It is not
@@ -28,8 +28,8 @@ typedef struct tlstran_pipe     tlstran_pipe;
 
 // tlstran_pipe is one end of a TLS connection.
 struct tlstran_pipe {
-	nng_stream *    tls;
-	nni_pipe *      npipe;
+	nng_stream     *tls;
+	nni_pipe       *npipe;
 	uint16_t        peer;
 	uint16_t        proto;
 	size_t          rcvmax;
@@ -37,8 +37,7 @@ struct tlstran_pipe {
 	nni_list_node   node;
 	nni_list        sendq;
 	nni_list        recvq;
-	tlstran_ep *    ep;
-	nni_sockaddr    sa;
+	tlstran_ep     *ep;
 	nni_atomic_flag reaped;
 	nni_reap_node   reap;
 	uint8_t         txlen[sizeof(uint64_t)];
@@ -47,10 +46,10 @@ struct tlstran_pipe {
 	size_t          gotrxhead;
 	size_t          wanttxhead;
 	size_t          wantrxhead;
-	nni_aio *       txaio;
-	nni_aio *       rxaio;
-	nni_aio *       negoaio;
-	nni_msg *       rxmsg;
+	nni_aio        *txaio;
+	nni_aio        *rxaio;
+	nni_aio        *negoaio;
+	nni_msg        *rxmsg;
 	nni_mtx         mtx;
 };
 
@@ -63,20 +62,17 @@ struct tlstran_ep {
 	bool                 closed;
 	bool                 fini;
 	int                  refcnt;
-	int                  authmode;
-	nni_url *            url;
 	nni_list             pipes;
 	nni_reap_node        reap;
-	nng_stream_dialer *  dialer;
+	nng_stream_dialer   *dialer;
 	nng_stream_listener *listener;
-	nni_aio *            useraio;
-	nni_aio *            connaio;
-	nni_aio *            timeaio;
+	nni_aio             *useraio;
+	nni_aio             *connaio;
+	nni_aio             *timeaio;
 	nni_list             busypipes; // busy pipes -- ones passed to socket
 	nni_list             waitpipes; // pipes waiting to match to socket
 	nni_list             negopipes; // pipes busy negotiating
-	const char *         host;
-	nng_sockaddr         src;
+	const char          *host;
 	nng_sockaddr         sa;
 	nni_stat_item        st_rcv_max;
 };
@@ -143,7 +139,7 @@ static void
 tlstran_pipe_fini(void *arg)
 {
 	tlstran_pipe *p = arg;
-	tlstran_ep *  ep;
+	tlstran_ep   *ep;
 
 	tlstran_pipe_stop(p);
 	if ((ep = p->ep) != NULL) {
@@ -155,10 +151,10 @@ tlstran_pipe_fini(void *arg)
 		}
 		nni_mtx_unlock(&ep->mtx);
 	}
+	nng_stream_free(p->tls);
 	nni_aio_free(p->rxaio);
 	nni_aio_free(p->txaio);
 	nni_aio_free(p->negoaio);
-	nng_stream_free(p->tls);
 	nni_msg_free(p->rxmsg);
 	NNI_FREE_STRUCT(p);
 }
@@ -203,7 +199,7 @@ tlstran_pipe_reap(tlstran_pipe *p)
 static void
 tlstran_ep_match(tlstran_ep *ep)
 {
-	nni_aio *     aio;
+	nni_aio      *aio;
 	tlstran_pipe *p;
 
 	if (((aio = ep->useraio) == NULL) ||
@@ -222,9 +218,9 @@ static void
 tlstran_pipe_nego_cb(void *arg)
 {
 	tlstran_pipe *p   = arg;
-	tlstran_ep *  ep  = p->ep;
-	nni_aio *     aio = p->negoaio;
-	nni_aio *     uaio;
+	tlstran_ep   *ep  = p->ep;
+	nni_aio      *aio = p->negoaio;
+	nni_aio      *uaio;
 	int           rv;
 
 	nni_mtx_lock(&ep->mtx);
@@ -287,6 +283,7 @@ error:
 	if (rv == NNG_ECLOSED) {
 		rv = NNG_ECONNSHUT;
 	}
+	nni_list_remove(&ep->negopipes, p);
 	nng_stream_close(p->tls);
 
 	if ((uaio = ep->useraio) != NULL) {
@@ -302,10 +299,10 @@ tlstran_pipe_send_cb(void *arg)
 {
 	tlstran_pipe *p = arg;
 	int           rv;
-	nni_aio *     aio;
+	nni_aio      *aio;
 	size_t        n;
-	nni_msg *     msg;
-	nni_aio *     txaio = p->txaio;
+	nni_msg      *msg;
+	nni_aio      *txaio = p->txaio;
 
 	nni_mtx_lock(&p->mtx);
 	aio = nni_list_first(&p->sendq);
@@ -346,11 +343,11 @@ static void
 tlstran_pipe_recv_cb(void *arg)
 {
 	tlstran_pipe *p = arg;
-	nni_aio *     aio;
+	nni_aio      *aio;
 	int           rv;
 	size_t        n;
-	nni_msg *     msg;
-	nni_aio *     rxaio = p->rxaio;
+	nni_msg      *msg;
+	nni_aio      *rxaio = p->rxaio;
 
 	nni_mtx_lock(&p->mtx);
 	aio = nni_list_first(&p->recvq);
@@ -379,6 +376,20 @@ tlstran_pipe_recv_cb(void *arg)
 		// Make sure the message payload is not too big.  If it is
 		// the caller will shut down the pipe.
 		if ((len > p->rcvmax) && (p->rcvmax > 0)) {
+			nng_sockaddr_storage ss;
+			nng_sockaddr        *sa = (nng_sockaddr *) &ss;
+			char                 peername[64] = "unknown";
+			if ((rv = nng_stream_get_addr(
+			         p->tls, NNG_OPT_REMADDR, sa)) == 0) {
+				(void) nng_str_sockaddr(
+				    sa, peername, sizeof(peername));
+			}
+			nng_log_warn("NNG-RCVMAX",
+			    "Oversize message of %lu bytes (> %lu) "
+			    "on socket<%u> pipe<%u> from TLS %s",
+			    (unsigned long) len, (unsigned long) p->rcvmax,
+			    nni_pipe_sock_id(p->npipe), nni_pipe_id(p->npipe),
+			    peername);
 			rv = NNG_EMSGSIZE;
 			goto recv_error;
 		}
@@ -498,6 +509,10 @@ tlstran_pipe_send(void *arg, nni_aio *aio)
 	int           rv;
 
 	if (nni_aio_begin(aio) != 0) {
+		// No way to give the message back to the protocol, so
+		// we just discard it silently to prevent it from leaking.
+		nni_msg_free(nni_aio_get_msg(aio));
+		nni_aio_set_msg(aio, NULL);
 		return;
 	}
 	nni_mtx_lock(&p->mtx);
@@ -640,7 +655,7 @@ tlstran_ep_fini(void *arg)
 static void
 tlstran_ep_close(void *arg)
 {
-	tlstran_ep *  ep = arg;
+	tlstran_ep   *ep = arg;
 	tlstran_pipe *p;
 
 	nni_mtx_lock(&ep->mtx);
@@ -669,63 +684,6 @@ tlstran_ep_close(void *arg)
 	nni_mtx_unlock(&ep->mtx);
 }
 
-// This parses off the optional source address that this transport uses.
-// The special handling of this URL format is quite honestly an historical
-// mistake, which we would remove if we could.
-static int
-tlstran_url_parse_source(nni_url *url, nng_sockaddr *sa, const nni_url *surl)
-{
-	int      af;
-	char *   semi;
-	char *   src;
-	size_t   len;
-	int      rv;
-	nni_aio *aio;
-
-	// We modify the URL.  This relies on the fact that the underlying
-	// transport does not free this, so we can just use references.
-
-	url->u_scheme   = surl->u_scheme;
-	url->u_port     = surl->u_port;
-	url->u_hostname = surl->u_hostname;
-
-	if ((semi = strchr(url->u_hostname, ';')) == NULL) {
-		memset(sa, 0, sizeof(*sa));
-		return (0);
-	}
-
-	len             = (size_t) (semi - url->u_hostname);
-	url->u_hostname = semi + 1;
-
-	if (strcmp(surl->u_scheme, "tls+tcp") == 0) {
-		af = NNG_AF_UNSPEC;
-	} else if (strcmp(surl->u_scheme, "tls+tcp4") == 0) {
-		af = NNG_AF_INET;
-	} else if (strcmp(surl->u_scheme, "tls+tcp6") == 0) {
-		af = NNG_AF_INET6;
-	} else {
-		return (NNG_EADDRINVAL);
-	}
-
-	if ((src = nni_alloc(len + 1)) == NULL) {
-		return (NNG_ENOMEM);
-	}
-	memcpy(src, surl->u_hostname, len);
-	src[len] = '\0';
-
-	if ((rv = nni_aio_alloc(&aio, NULL, NULL)) != 0) {
-		nni_free(src, len + 1);
-		return (rv);
-	}
-
-	nni_resolv_ip(src, "0", af, 1, sa, aio);
-	nni_aio_wait(aio);
-	rv = nni_aio_result(aio);
-	nni_aio_free(aio);
-	nni_free(src, len + 1);
-	return (rv);
-}
-
 static void
 tlstran_timer_cb(void *arg)
 {
@@ -738,11 +696,11 @@ tlstran_timer_cb(void *arg)
 static void
 tlstran_accept_cb(void *arg)
 {
-	tlstran_ep *  ep  = arg;
-	nni_aio *     aio = ep->connaio;
+	tlstran_ep   *ep  = arg;
+	nni_aio      *aio = ep->connaio;
 	tlstran_pipe *p;
 	int           rv;
-	nng_stream *  conn;
+	nng_stream   *conn;
 
 	nni_mtx_lock(&ep->mtx);
 
@@ -797,11 +755,11 @@ error:
 static void
 tlstran_dial_cb(void *arg)
 {
-	tlstran_ep *  ep  = arg;
-	nni_aio *     aio = ep->connaio;
+	tlstran_ep   *ep  = arg;
+	nni_aio      *aio = ep->connaio;
 	tlstran_pipe *p;
 	int           rv;
-	nng_stream *  conn;
+	nng_stream   *conn;
 
 	if ((rv = nni_aio_result(aio)) != 0) {
 		goto error;
@@ -839,6 +797,7 @@ static int
 tlstran_ep_init(tlstran_ep **epp, nng_url *url, nni_sock *sock)
 {
 	tlstran_ep *ep;
+	NNI_ARG_UNUSED(url);
 
 	if ((ep = NNI_ALLOC_STRUCT(ep)) == NULL) {
 		return (NNG_ENOMEM);
@@ -849,7 +808,6 @@ tlstran_ep_init(tlstran_ep **epp, nng_url *url, nni_sock *sock)
 	NNI_LIST_INIT(&ep->negopipes, tlstran_pipe, node);
 
 	ep->proto = nni_sock_proto_id(sock);
-	ep->url   = url;
 
 #ifdef NNG_ENABLE_STATS
 	static const nni_stat_info rcv_max_info = {
@@ -867,13 +825,11 @@ tlstran_ep_init(tlstran_ep **epp, nng_url *url, nni_sock *sock)
 }
 
 static int
-tlstran_ep_init_dialer(void **dp, nni_url *url, nni_dialer *ndialer)
+tlstran_ep_init_dialer(void **dp, nng_url *url, nni_dialer *ndialer)
 {
-	tlstran_ep * ep;
-	int          rv;
-	nng_sockaddr srcsa;
-	nni_sock *   sock = nni_dialer_sock(ndialer);
-	nni_url      myurl;
+	tlstran_ep *ep;
+	int         rv;
+	nni_sock   *sock = nni_dialer_sock(ndialer);
 
 	// Check for invalid URL components.
 	if ((strlen(url->u_path) != 0) && (strcmp(url->u_path, "/") != 0)) {
@@ -881,28 +837,17 @@ tlstran_ep_init_dialer(void **dp, nni_url *url, nni_dialer *ndialer)
 	}
 	if ((url->u_fragment != NULL) || (url->u_userinfo != NULL) ||
 	    (url->u_query != NULL) || (strlen(url->u_hostname) == 0) ||
-	    (strlen(url->u_port) == 0)) {
+	    (url->u_port == 0)) {
 		return (NNG_EADDRINVAL);
-	}
-
-	if ((rv = tlstran_url_parse_source(&myurl, &srcsa, url)) != 0) {
-		return (rv);
 	}
 
 	if (((rv = tlstran_ep_init(&ep, url, sock)) != 0) ||
 	    ((rv = nni_aio_alloc(&ep->connaio, tlstran_dial_cb, ep)) != 0)) {
 		return (rv);
 	}
-	ep->authmode = NNG_TLS_AUTH_MODE_REQUIRED;
 
 	if ((rv != 0) ||
-	    ((rv = nng_stream_dialer_alloc_url(&ep->dialer, &myurl)) != 0)) {
-		tlstran_ep_fini(ep);
-		return (rv);
-	}
-	if ((srcsa.s_family != NNG_AF_UNSPEC) &&
-	    ((rv = nni_stream_dialer_set(ep->dialer, NNG_OPT_LOCADDR, &srcsa,
-	          sizeof(srcsa), NNI_TYPE_SOCKADDR)) != 0)) {
+	    ((rv = nng_stream_dialer_alloc_url(&ep->dialer, url)) != 0)) {
 		tlstran_ep_fini(ep);
 		return (rv);
 	}
@@ -914,24 +859,11 @@ tlstran_ep_init_dialer(void **dp, nni_url *url, nni_dialer *ndialer)
 }
 
 static int
-tlstran_ep_init_listener(void **lp, nni_url *url, nni_listener *nlistener)
+tlstran_ep_init_listener(void **lp, nng_url *url, nni_listener *nlistener)
 {
 	tlstran_ep *ep;
 	int         rv;
-	uint16_t    af;
-	char *      host = url->u_hostname;
-	nni_aio *   aio;
-	nni_sock *  sock = nni_listener_sock(nlistener);
-
-	if (strcmp(url->u_scheme, "tls+tcp") == 0) {
-		af = NNG_AF_UNSPEC;
-	} else if (strcmp(url->u_scheme, "tls+tcp4") == 0) {
-		af = NNG_AF_INET;
-	} else if (strcmp(url->u_scheme, "tls+tcp6") == 0) {
-		af = NNG_AF_INET6;
-	} else {
-		return (NNG_EADDRINVAL);
-	}
+	nni_sock   *sock = nni_listener_sock(nlistener);
 
 	// Check for invalid URL components.
 	if ((strlen(url->u_path) != 0) && (strcmp(url->u_path, "/") != 0)) {
@@ -943,36 +875,8 @@ tlstran_ep_init_listener(void **lp, nni_url *url, nni_listener *nlistener)
 	}
 	if (((rv = tlstran_ep_init(&ep, url, sock)) != 0) ||
 	    ((rv = nni_aio_alloc(&ep->connaio, tlstran_accept_cb, ep)) != 0) ||
-	    ((rv = nni_aio_alloc(&ep->timeaio, tlstran_timer_cb, ep)) != 0)) {
-		return (rv);
-	}
-
-	ep->authmode = NNG_TLS_AUTH_MODE_NONE;
-
-	if (strlen(host) == 0) {
-		host = NULL;
-	}
-
-	// XXX: We are doing lookup at listener initialization.  There is
-	// a valid argument that this should be done at bind time, but that
-	// would require making bind asynchronous.  In some ways this would
-	// be worse than the cost of just waiting here.  We always recommend
-	// using local IP addresses rather than names when possible.
-
-	if ((rv = nni_aio_alloc(&aio, NULL, NULL)) != 0) {
-		tlstran_ep_fini(ep);
-		return (rv);
-	}
-	nni_resolv_ip(host, url->u_port, af, true, &ep->sa, aio);
-	nni_aio_wait(aio);
-	rv = nni_aio_result(aio);
-	nni_aio_free(aio);
-
-	if ((rv != 0) ||
-	    ((rv = nng_stream_listener_alloc_url(&ep->listener, url)) != 0) ||
-	    ((rv = nni_stream_listener_set(ep->listener, NNG_OPT_TLS_AUTH_MODE,
-	          &ep->authmode, sizeof(ep->authmode), NNI_TYPE_INT32)) !=
-	        0)) {
+	    ((rv = nni_aio_alloc(&ep->timeaio, tlstran_timer_cb, ep)) != 0) ||
+	    ((rv = nng_stream_listener_alloc_url(&ep->listener, url)) != 0)) {
 		tlstran_ep_fini(ep);
 		return (rv);
 	}
@@ -1028,13 +932,19 @@ tlstran_ep_connect(void *arg, nni_aio *aio)
 }
 
 static int
-tlstran_ep_bind(void *arg)
+tlstran_ep_bind(void *arg, nng_url *url)
 {
 	tlstran_ep *ep = arg;
 	int         rv;
 
 	nni_mtx_lock(&ep->mtx);
 	rv = nng_stream_listener_listen(ep->listener);
+	if (rv == 0) {
+		int port;
+		nng_stream_listener_get_int(
+		    ep->listener, NNG_OPT_TCP_BOUND_PORT, &port);
+		url->u_port = (uint32_t) port;
+	}
 	nni_mtx_unlock(&ep->mtx);
 
 	return (rv);
@@ -1082,18 +992,8 @@ tlstran_ep_set_recvmaxsz(void *arg, const void *v, size_t sz, nni_type t)
 	size_t      val;
 	int         rv;
 	if ((rv = nni_copyin_size(&val, v, sz, 0, NNI_MAXSZ, t)) == 0) {
-		tlstran_pipe *p;
 		nni_mtx_lock(&ep->mtx);
 		ep->rcvmax = val;
-		NNI_LIST_FOREACH (&ep->waitpipes, p) {
-			p->rcvmax = val;
-		}
-		NNI_LIST_FOREACH (&ep->negopipes, p) {
-			p->rcvmax = val;
-		}
-		NNI_LIST_FOREACH (&ep->busypipes, p) {
-			p->rcvmax = val;
-		}
 		nni_mtx_unlock(&ep->mtx);
 #ifdef NNG_ENABLE_STATS
 		nni_stat_set_value(&ep->st_rcv_max, val);
@@ -1110,25 +1010,6 @@ tlstran_ep_get_recvmaxsz(void *arg, void *v, size_t *szp, nni_type t)
 	nni_mtx_lock(&ep->mtx);
 	rv = nni_copyout_size(ep->rcvmax, v, szp, t);
 	nni_mtx_unlock(&ep->mtx);
-	return (rv);
-}
-
-static int
-tlstran_ep_get_url(void *arg, void *v, size_t *szp, nni_type t)
-{
-	tlstran_ep *ep = arg;
-	char *      s;
-	int         rv;
-	int         port = 0;
-
-	if (ep->listener != NULL) {
-		(void) nng_stream_listener_get_int(
-		    ep->listener, NNG_OPT_TCP_BOUND_PORT, &port);
-	}
-	if ((rv = nni_url_asprintf_port(&s, ep->url, port)) == 0) {
-		rv = nni_copyout_str(s, v, szp, t);
-		nni_strfree(s);
-	}
 	return (rv);
 }
 
@@ -1168,10 +1049,6 @@ static nni_option tlstran_ep_options[] = {
 	    .o_name = NNG_OPT_RECVMAXSZ,
 	    .o_get  = tlstran_ep_get_recvmaxsz,
 	    .o_set  = tlstran_ep_set_recvmaxsz,
-	},
-	{
-	    .o_name = NNG_OPT_URL,
-	    .o_get  = tlstran_ep_get_url,
 	},
 	// terminate list
 	{
@@ -1237,6 +1114,34 @@ tlstran_listener_set(
 	return (rv);
 }
 
+static int
+tlstran_listener_set_tls(void *arg, nng_tls_config *cfg)
+{
+	tlstran_ep *ep = arg;
+	return (nni_stream_listener_set_tls(ep->listener, cfg));
+}
+
+static int
+tlstran_listener_get_tls(void *arg, nng_tls_config **cfgp)
+{
+	tlstran_ep *ep = arg;
+	return (nni_stream_listener_get_tls(ep->listener, cfgp));
+}
+
+static int
+tlstran_dialer_set_tls(void *arg, nng_tls_config *cfg)
+{
+	tlstran_ep *ep = arg;
+	return (nni_stream_dialer_set_tls(ep->dialer, cfg));
+}
+
+static int
+tlstran_dialer_get_tls(void *arg, nng_tls_config **cfgp)
+{
+	tlstran_ep *ep = arg;
+	return (nni_stream_dialer_get_tls(ep->dialer, cfgp));
+}
+
 static nni_sp_dialer_ops tlstran_dialer_ops = {
 	.d_init    = tlstran_ep_init_dialer,
 	.d_fini    = tlstran_ep_fini,
@@ -1244,16 +1149,20 @@ static nni_sp_dialer_ops tlstran_dialer_ops = {
 	.d_close   = tlstran_ep_close,
 	.d_getopt  = tlstran_dialer_getopt,
 	.d_setopt  = tlstran_dialer_setopt,
+	.d_get_tls = tlstran_dialer_get_tls,
+	.d_set_tls = tlstran_dialer_set_tls,
 };
 
 static nni_sp_listener_ops tlstran_listener_ops = {
-	.l_init   = tlstran_ep_init_listener,
-	.l_fini   = tlstran_ep_fini,
-	.l_bind   = tlstran_ep_bind,
-	.l_accept = tlstran_ep_accept,
-	.l_close  = tlstran_ep_close,
-	.l_getopt = tlstran_listener_get,
-	.l_setopt = tlstran_listener_set,
+	.l_init    = tlstran_ep_init_listener,
+	.l_fini    = tlstran_ep_fini,
+	.l_bind    = tlstran_ep_bind,
+	.l_accept  = tlstran_ep_accept,
+	.l_close   = tlstran_ep_close,
+	.l_getopt  = tlstran_listener_get,
+	.l_setopt  = tlstran_listener_set,
+	.l_set_tls = tlstran_listener_set_tls,
+	.l_get_tls = tlstran_listener_get_tls,
 };
 
 static nni_sp_tran tls_tran = {
@@ -1274,6 +1183,7 @@ static nni_sp_tran tls4_tran = {
 	.tran_fini     = tlstran_fini,
 };
 
+#ifdef NNG_ENABLE_IPV6
 static nni_sp_tran tls6_tran = {
 	.tran_scheme   = "tls+tcp6",
 	.tran_dialer   = &tlstran_dialer_ops,
@@ -1282,17 +1192,14 @@ static nni_sp_tran tls6_tran = {
 	.tran_init     = tlstran_init,
 	.tran_fini     = tlstran_fini,
 };
-
-int
-nng_tls_register(void)
-{
-	return (nni_init());
-}
+#endif
 
 void
 nni_sp_tls_register(void)
 {
 	nni_sp_tran_register(&tls_tran);
 	nni_sp_tran_register(&tls4_tran);
+#ifdef NNG_ENABLE_IPV6
 	nni_sp_tran_register(&tls6_tran);
+#endif
 }

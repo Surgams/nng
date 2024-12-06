@@ -1,5 +1,5 @@
 //
-// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2024 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -17,6 +17,7 @@
 
 #include "core/defs.h"
 #include "core/thread.h"
+#include "nng/nng.h"
 #include "sp/transport.h"
 
 // AIO
@@ -33,8 +34,7 @@ extern void nni_pipe_close(nni_pipe *);
 
 extern uint16_t nni_pipe_peer(nni_pipe *);
 
-// nni_pipe_getopt looks up the option.  The last argument is the type,
-// which.  If the type is NNI_TYPE_OPAQUE, then no format check is performed.
+// nni_pipe_getopt looks up the option.
 extern int nni_pipe_getopt(
     nni_pipe *, const char *, void *, size_t *, nni_opt_type);
 
@@ -60,5 +60,7 @@ extern void nni_pipe_add_stat(nni_pipe *, nni_stat_item *);
 extern void nni_pipe_bump_rx(nni_pipe *, size_t);
 extern void nni_pipe_bump_tx(nni_pipe *, size_t);
 extern void nni_pipe_bump_error(nni_pipe *, int);
+
+extern char *nni_pipe_peer_addr(nni_pipe *p, char buf[NNG_MAXADDRSTRLEN]);
 
 #endif // CORE_PIPE_H

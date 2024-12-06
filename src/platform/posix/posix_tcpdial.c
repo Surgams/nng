@@ -1,5 +1,5 @@
 //
-// Copyright 2023 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2024 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 // Copyright 2018 Devolutions <info@devolutions.net>
 //
@@ -23,6 +23,10 @@
 
 #include "posix_tcp.h"
 
+#ifndef NNG_HAVE_INET6
+#undef NNG_ENABLE_IPV6
+#endif
+
 // Dialer stuff.
 int
 nni_tcp_dialer_init(nni_tcp_dialer **dp)
@@ -33,7 +37,8 @@ nni_tcp_dialer_init(nni_tcp_dialer **dp)
 		return (NNG_ENOMEM);
 	}
 	nni_mtx_init(&d->mtx);
-	d->closed = false;
+	d->closed  = false;
+	d->nodelay = true;
 	nni_aio_list_init(&d->connq);
 	nni_atomic_init_bool(&d->fini);
 	nni_atomic_init64(&d->ref);
@@ -93,7 +98,7 @@ static void
 tcp_dialer_cancel(nni_aio *aio, void *arg, int rv)
 {
 	nni_tcp_dialer *d = arg;
-	nni_tcp_conn *  c;
+	nni_tcp_conn   *c;
 
 	nni_mtx_lock(&d->mtx);
 	if ((!nni_aio_list_active(aio)) ||
@@ -113,9 +118,9 @@ tcp_dialer_cancel(nni_aio *aio, void *arg, int rv)
 static void
 tcp_dialer_cb(nni_posix_pfd *pfd, unsigned ev, void *arg)
 {
-	nni_tcp_conn *  c = arg;
+	nni_tcp_conn   *c = arg;
 	nni_tcp_dialer *d = c->dialer;
-	nni_aio *       aio;
+	nni_aio        *aio;
 	int             rv;
 	int             ka;
 	int             nd;
@@ -171,8 +176,8 @@ tcp_dialer_cb(nni_posix_pfd *pfd, unsigned ev, void *arg)
 void
 nni_tcp_dial(nni_tcp_dialer *d, const nni_sockaddr *sa, nni_aio *aio)
 {
-	nni_tcp_conn *          c;
-	nni_posix_pfd *         pfd = NULL;
+	nni_tcp_conn           *c;
+	nni_posix_pfd          *pfd = NULL;
 	struct sockaddr_storage ss;
 	size_t                  sslen;
 	int                     fd;
@@ -333,15 +338,18 @@ tcp_dialer_get_locaddr(void *arg, void *buf, size_t *szp, nni_type t)
 static int
 tcp_dialer_set_locaddr(void *arg, const void *buf, size_t sz, nni_type t)
 {
-	nni_tcp_dialer *        d = arg;
+	nni_tcp_dialer         *d = arg;
 	nng_sockaddr            sa;
 	struct sockaddr_storage ss;
-	struct sockaddr_in *    sin;
-	struct sockaddr_in6 *   sin6;
+	struct sockaddr_in     *sin;
 	size_t                  len;
 	int                     rv;
+#ifdef NNG_ENABLE_IPV6
+	struct sockaddr_in6 *sin6;
+#endif
+	NNI_ARG_UNUSED(sz);
 
-	if ((rv = nni_copyin_sockaddr(&sa, buf, sz, t)) != 0) {
+	if ((rv = nni_copyin_sockaddr(&sa, buf, t)) != 0) {
 		return (rv);
 	}
 	if ((len = nni_posix_nn2sockaddr(&ss, &sa)) == 0) {
@@ -356,12 +364,16 @@ tcp_dialer_set_locaddr(void *arg, const void *buf, size_t sz, nni_type t)
 			return (NNG_EADDRINVAL);
 		}
 		break;
+
+#ifdef NNG_ENABLE_IPV6
 	case AF_INET6:
 		sin6 = (void *) &ss;
 		if (sin6->sin6_port != 0) {
 			return (NNG_EADDRINVAL);
 		}
 		break;
+#endif // __NG_INET6
+
 	default:
 		return (NNG_EADDRINVAL);
 	}

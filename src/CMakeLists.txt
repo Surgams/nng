@@ -1,5 +1,5 @@
 #
-# Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
+# Copyright 2024 Staysail Systems, Inc. <info@staysail.tech>
 # Copyright 2018 Capitar IT Group BV <info@capitar.com>
 #
 # This software is supplied under the terms of the MIT License, a
@@ -16,7 +16,6 @@ target_include_directories(nng_testing PRIVATE ${PROJECT_SOURCE_DIR}/src)
 
 add_subdirectory(core)
 add_subdirectory(platform)
-add_subdirectory(compat)
 add_subdirectory(sp)
 add_subdirectory(supplemental)
 add_subdirectory(tools)

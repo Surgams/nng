@@ -1,5 +1,5 @@
 #
-#   Copyright 2023 Staysail Systems, Inc. <info@staysail.tech>
+#   Copyright 2024 Staysail Systems, Inc. <info@staysail.tech>
 #   Copyright (c) 2012 Martin Sustrik  All rights reserved.
 #   Copyright (c) 2013 GoPivotal, Inc.  All rights reserved.
 #   Copyright (c) 2015-2016 Jack R. Dunaway. All rights reserved.
@@ -25,7 +25,7 @@
 #   IN THE SOFTWARE.
 #
 
-cmake_minimum_required(VERSION 3.13)
+cmake_minimum_required(VERSION 3.15)
 
 project(nng C)
 include(CheckCCompilerFlag)
@@ -55,8 +55,10 @@ set(NNG_MINOR_VERSION ${CMAKE_MATCH_1})
 string(REGEX MATCH "NNG_PATCH_VERSION ([0-9]*)" _ ${nng_ver_h})
 set(NNG_PATCH_VERSION ${CMAKE_MATCH_1})
 string(REGEX MATCH "NNG_RELEASE_SUFFIX \"([a-z0-9]*)\"" _ ${nng_ver_h})
-if (NOT ("${CMAKE_MATCH_1}" STREQUAL ""))
-    set(NNG_PRERELEASE "-${CMAKE_MATCH_1}")
+set(NNG_DEV_VERSION ${CMAKE_MATCH_1})
+if (NNG_DEV_VERSION)
+    message(STATUS "This is a prelease.")
+    set(NNG_PRERELEASE "-${NNG_DEV_VERSION}")
 endif ()
 
 set(NNG_ABI_SOVERSION 1)
@@ -97,7 +99,6 @@ if (NNG_ELIDE_DEPRECATED)
     target_compile_definitions(nng PRIVATE NNG_ELIDE_DEPRECATED)
 endif()
 
-
 # We can use rlimit to configure the stack size for systems
 # that have too small defaults.  This is not used for Windows,
 # which can grow thread stacks sensibly.  (Note that NNG can get
@@ -114,17 +115,22 @@ endif ()
 
 nng_defines_if(NNG_ENABLE_STATS NNG_ENABLE_STATS)
 
+# IPv6 enable
+nng_defines_if(NNG_ENABLE_IPV6 NNG_ENABLE_IPV6)
+
+set(NNG_RESOLV_CONCURRENCY 4 CACHE STRING "Resolver (DNS) concurrency.")
+mark_as_advanced(NNG_RESOLV_CONCURRENCY)
 if (NNG_RESOLV_CONCURRENCY)
     add_definitions(-DNNG_RESOLV_CONCURRENCY=${NNG_RESOLV_CONCURRENCY})
 endif ()
-mark_as_advanced(NNG_RESOLV_CONCURRENCY)
 
+set(NNG_NUM_TASKQ_THREADS 0 CACHE STRING "Fixed number of task threads, 0 for automatic")
+mark_as_advanced(NNG_NUM_TASKQ_THREADS)
 if (NNG_NUM_TASKQ_THREADS)
     add_definitions(-DNNG_NUM_TASKQ_THREADS=${NNG_NUM_TASKQ_THREADS})
 endif ()
-mark_as_advanced(NNG_NUM_TASKQ_THREADS)
 
-set(NNG_MAX_TASKQ_THREADS 16 CACHE STRING "Upper bound on taskq threads, 0 for no limit")
+set(NNG_MAX_TASKQ_THREADS 16 CACHE STRING "Upper bound on task threads, 0 for no limit")
 mark_as_advanced(NNG_MAX_TASKQ_THREADS)
 if (NNG_MAX_TASKQ_THREADS)
     add_definitions(-DNNG_MAX_TASKQ_THREADS=${NNG_MAX_TASKQ_THREADS})
@@ -132,10 +138,30 @@ endif ()
 
 # Expire threads. This runs the timeout handling, and having more of them
 # reduces contention on the common locks used for aio expiration.
+set(NNG_NUM_EXPIRE_THREADS 0 CACHE STRING "Fixed number of expire threads, 0 for automatic")
+mark_as_advanced(NNG_NUM_EXPIRE_THREADS)
+if (NNG_NUM_EXPIRE_THREADS)
+    add_definitions(-DNNG_NUM_EXPIRE_THREADS=${NNG_NUM_EXPIRE_THREADS})
+endif ()
+
 set(NNG_MAX_EXPIRE_THREADS 8 CACHE STRING "Upper bound on expire threads, 0 for no limit")
 mark_as_advanced(NNG_MAX_EXPIRE_THREADS)
 if (NNG_MAX_EXPIRE_THREADS)
     add_definitions(-DNNG_MAX_EXPIRE_THREADS=${NNG_MAX_EXPIRE_THREADS})
+endif()
+
+# Poller threads.  These threads run the pollers.  This is mostly used
+# on Windows right now, as the POSIX platforms use a single threaded poller.
+set(NNG_NUM_POLLER_THREADS 0 CACHE STRING "Fixed number of I/O poller threads, 0 for automatic")
+if (NNG_NUM_POLLER_THREADS)
+    add_definitions(-DNNG_NUM_POLLER_THREADS=${NNG_NUM_POLLER_THREADS})
+endif ()
+mark_as_advanced(NNG_NUM_POLLER_THREADS)
+
+set(NNG_MAX_POLLER_THREADS 8 CACHE STRING "Upper bound on I/O poller threads, 0 for no limit")
+mark_as_advanced(NNG_MAX_POLLER_THREADS)
+if (NNG_MAX_POLLER_THREADS)
+    add_definitions(-DNNG_MAX_POLLER_THREADS=${NNG_MAX_POLLER_THREADS})
 endif()
 
 #  Platform checks.
@@ -150,6 +176,7 @@ include(CheckSanitizer)
 CheckSanitizer()
 if (NOT NNG_SANITIZER STREQUAL "none")
     set(NNG_SANITIZER_FLAGS "-fsanitize=${NNG_SANITIZER}")
+    add_definitions(-DNNG_SANITIZER)
 endif ()
 
 if (NNG_ENABLE_COVERAGE)
@@ -165,6 +192,7 @@ if (NNG_ENABLE_COVERAGE)
     else ()
         message(FATAL_ERROR "Unable to enable coverage for your compiler.")
     endif ()
+    add_definitions(-DNNG_CONVERAGE)
 endif ()
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${NNG_WARN_FLAGS} ${NNG_COVERAGE_C_FLAGS} ${NNG_SANITIZER_FLAGS}")
@@ -178,6 +206,24 @@ if (NOT WIN32 AND NOT CYGWIN)
         add_definitions(-DNNG_HIDDEN_VISIBILITY)
     endif ()
 endif ()
+
+# Detect endianness -- this only handles little and big endian.
+# PDP users, sorry, but you're out of luck.'
+if (DEFINED CMAKE_LANG_C_BYTE_ORDER)
+    if (CMAKE_LANG_BYTE_ORDER EQUAL BIG_ENDIAN)
+        add_definitions(-DNNG_BIG_ENDIAN=1)
+    else()
+        add_definitions(-DNNG_LITTLE_ENDIAN=1)
+    endif()
+else()
+    include(TestBigEndian)
+    test_big_endian(NNG_BIG_ENDIAN)
+    if (NNG_BIG_ENDIAN)
+        add_definitions(-DNNG_BIG_EDNDIAN=1)
+    else()
+        add_definitions(-DNNG_LITTLE_ENDIAN=1)
+    endif()
+endif()
 
 if (CMAKE_SYSTEM_NAME MATCHES "Linux")
     add_definitions(-DNNG_PLATFORM_POSIX)

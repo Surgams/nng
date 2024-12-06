@@ -1,5 +1,5 @@
 #
-#   Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
+#   Copyright 2024 Staysail Systems, Inc. <info@staysail.tech>
 #   Copyright 2018 Capitar IT Group BV <info@capitar.com>
 #   Copyright (c) 2012 Martin Sustrik  All rights reserved.
 #   Copyright (c) 2013 GoPivotal, Inc.  All rights reserved.
@@ -124,56 +124,10 @@ else ()
     endmacro(add_nng_test3)
 endif ()
 
-add_nng_test(device 5)
-add_nng_test(files 5)
 add_nng_test1(httpclient 60 NNG_SUPP_HTTP)
 add_nng_test1(httpserver 30 NNG_SUPP_HTTP)
-add_nng_test(inproc 5)
-add_nng_test(ipc 5)
-add_nng_test(ipcsupp 10)
-add_nng_test(multistress 60)
-add_nng_test(nonblock 60)
-add_nng_test(options 5)
-add_nng_test(pipe 5)
-add_nng_test(pollfd 5)
-add_nng_test(scalability 20 ON)
-add_nng_test(synch 5)
-add_nng_test(tls 60)
-add_nng_test(tcpsupp 10)
-add_nng_test(tcp 180)
-add_nng_test(tcp6 60)
-add_nng_test(udp 5)
-add_nng_test(ws 30)
 add_nng_test(wss 30)
 add_nng_test1(zt 60 NNG_TRANSPORT_ZEROTIER)
-
-add_nng_test(reqctx 5)
-add_nng_test(reqstress 60)
-
-# compatibility tests
-# We only support these if ALL the legacy protocols are supported.  This
-# is because we don't want to make modifications to partially enable some
-# of these tests.  Folks minimizing the library probably don't care too
-# much about these anyway.
-add_nng_compat_test(compat_block 10)
-add_nng_compat_test(compat_bug777 10)
-add_nng_compat_test(compat_bus 10)
-add_nng_compat_test(compat_cmsg 10)
-add_nng_compat_test(compat_msg 10)
-add_nng_compat_test(compat_iovec 10)
-add_nng_compat_test(compat_device 10)
-add_nng_compat_test(compat_pair 10)
-add_nng_compat_test(compat_pipeline 10)
-add_nng_compat_test(compat_poll 10)
-add_nng_compat_test(compat_reqrep 10)
-add_nng_compat_test(compat_survey 10)
-add_nng_compat_test(compat_reqttl 10)
-add_nng_compat_test(compat_shutdown 10)
-add_nng_compat_test(compat_surveyttl 10)
-
-# These are special tests for compat mode, not inherited from the
-# legacy libnanomsg suite.
-add_nng_test(compat_options 5)
 
 # c++ tests
 add_nng_cpp_test(cplusplus_pair 5)

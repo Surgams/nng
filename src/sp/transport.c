@@ -1,5 +1,5 @@
 //
-// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2024 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 // Copyright 2019 Devolutions <info@devolutions.net>
 //
@@ -25,19 +25,23 @@ nni_sp_tran_register(nni_sp_tran *tran)
 	if (!nni_list_node_active(&tran->tran_link)) {
 		tran->tran_init();
 		nni_list_append(&sp_tran_list, tran);
+		nng_log_info(
+		    "NNG-TRAN", "Registered transport: %s", tran->tran_scheme);
 	}
 	nni_rwlock_unlock(&sp_tran_lk);
 }
 
 nni_sp_tran *
-nni_sp_tran_find(nni_url *url)
+nni_sp_tran_find(const char *url)
 {
 	// address is of the form "<scheme>://blah..."
 	nni_sp_tran *t;
 
 	nni_rwlock_rdlock(&sp_tran_lk);
 	NNI_LIST_FOREACH (&sp_tran_list, t) {
-		if (strcmp(url->u_scheme, t->tran_scheme) == 0) {
+		size_t len = strlen(t->tran_scheme);
+		if ((strncmp(url, t->tran_scheme, len) == 0) &&
+		    (url[len] == ':' || url[len] == '\0')) {
 			nni_rwlock_unlock(&sp_tran_lk);
 			return (t);
 		}
@@ -61,6 +65,9 @@ extern void nni_sp_tcp_register(void);
 #ifdef NNG_TRANSPORT_TLS
 extern void nni_sp_tls_register(void);
 #endif
+#ifdef NNG_TRANSPORT_UDP
+extern void nni_sp_udp_register(void);
+#endif
 #ifdef NNG_TRANSPORT_WS
 extern void nni_sp_ws_register(void);
 #endif
@@ -69,6 +76,9 @@ extern void nni_sp_wss_register(void);
 #endif
 #ifdef NNG_TRANSPORT_ZEROTIER
 extern void nni_sp_zt_register(void);
+#endif
+#ifdef NNG_TRANSPORT_FDC
+extern void nni_sp_sfd_register(void);
 #endif
 
 void
@@ -86,6 +96,9 @@ nni_sp_tran_sys_init(void)
 #ifdef NNG_TRANSPORT_TLS
 	nni_sp_tls_register();
 #endif
+#ifdef NNG_TRANSPORT_UDP
+	nni_sp_udp_register();
+#endif
 #ifdef NNG_TRANSPORT_WS
 	nni_sp_ws_register();
 #endif
@@ -94,6 +107,9 @@ nni_sp_tran_sys_init(void)
 #endif
 #ifdef NNG_TRANSPORT_ZEROTIER
 	nni_sp_zt_register();
+#endif
+#ifdef NNG_TRANSPORT_FDC
+	nni_sp_sfd_register();
 #endif
 }
 

@@ -1,5 +1,5 @@
 //
-// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2024 Staysail Systems, Inc. <info@staysail.tech>
 //
 // This software is supplied under the terms of the MIT License, a
 // copy of which should be located in the distribution where this
@@ -17,9 +17,24 @@
 #ifndef NNG_TESTING_NUTS_H
 #define NNG_TESTING_NUTS_H
 
+#include <nng/nng.h>
+extern void nuts_set_logger(int);
+extern void nuts_logger(
+    nng_log_level, nng_log_facility, const char *, const char *);
+
 // Call nng_fini during test finalization -- this avoids leak warnings.
-extern void nng_fini(void);
+#ifndef TEST_FINI
 #define TEST_FINI nng_fini()
+#endif
+
+#ifndef TEST_INIT
+#define TEST_INIT                                \
+	do {                                     \
+		nng_init(NULL);                  \
+		nng_log_set_logger(nuts_logger); \
+		nng_log_set_level(NNG_LOG_NONE); \
+	} while (0)
+#endif
 #include "acutest.h"
 
 #include <stdbool.h>
@@ -27,7 +42,6 @@ extern void nng_fini(void);
 #include <string.h>
 
 // The following headers are provided for test code convenience.
-#include <nng/nng.h>
 #include <nng/protocol/bus0/bus.h>
 #include <nng/protocol/pair0/pair.h>
 #include <nng/protocol/pair1/pair.h>
@@ -40,8 +54,6 @@ extern void nng_fini(void);
 #include <nng/protocol/survey0/respond.h>
 #include <nng/protocol/survey0/survey.h>
 #include <nng/supplemental/tls/tls.h>
-#include <nng/supplemental/util/platform.h>
-#include <nng/transport/ws/websocket.h>
 #include <supplemental/sha1/sha1.h>
 
 #ifdef __cplusplus
@@ -94,6 +106,94 @@ extern void *nuts_stream_send_start(nng_stream *, void *, size_t);
 extern void *nuts_stream_recv_start(nng_stream *, void *, size_t);
 extern int   nuts_stream_wait(void *);
 
+// nuts_tran_ functions are implementation of tesets
+// for transports, to improve code reuse.
+extern void nuts_tran_conn_refused(const char *scheme);
+extern void nuts_tran_dialer_cancel(const char *scheme);
+extern void nuts_tran_dialer_closed(const char *scheme);
+extern void nuts_tran_duplicate_listen(const char *scheme);
+extern void nuts_tran_listener_cancel(const char *scheme);
+extern void nuts_tran_listener_closed(const char *scheme);
+extern void nuts_tran_listen_accept(const char *scheme);
+extern void nuts_tran_exchange(const char *scheme);
+extern void nuts_tran_pipe_id(const char *scheme);
+extern void nuts_tran_huge_msg(const char *scheme, size_t size);
+extern void nuts_tran_msg_props(const char *scheme, void (*check)(nng_msg *));
+extern void nuts_tran_perf(const char *scheme);
+
+#define NUTS_SKIP_IF_IPV6_NEEDED_AND_ABSENT(scheme)                        \
+	do {                                                               \
+		if ((strchr(scheme, '6') != NULL) && (!nuts_has_ipv6())) { \
+			NUTS_SKIP("No IPv6 support present");              \
+			return;                                            \
+		}                                                          \
+	} while (0)
+
+#ifndef NUTS_TRAN_HUGE_MSG_SIZE
+#define NUTS_TRAN_HUGE_MSG_SIZE (1U << 20)
+#endif
+
+#define NUTS_DECLARE_TRAN_TESTS(scheme)                               \
+	void test_##scheme##_conn_refused(void)                       \
+	{                                                             \
+		nuts_tran_conn_refused(#scheme);                      \
+	}                                                             \
+	void test_##scheme##_dialer_cancel(void)                      \
+	{                                                             \
+		nuts_tran_dialer_cancel(#scheme);                     \
+	}                                                             \
+	void test_##scheme##_dialer_closed(void)                      \
+	{                                                             \
+		nuts_tran_dialer_closed(#scheme);                     \
+	}                                                             \
+	void test_##scheme##_duplicate_listen(void)                   \
+	{                                                             \
+		nuts_tran_duplicate_listen(#scheme);                  \
+	}                                                             \
+	void test_##scheme##_listener_cancel(void)                    \
+	{                                                             \
+		nuts_tran_listener_cancel(#scheme);                   \
+	}                                                             \
+	void test_##scheme##_listener_closed(void)                    \
+	{                                                             \
+		nuts_tran_listener_closed(#scheme);                   \
+	}                                                             \
+	void test_##scheme##_listen_accept(void)                      \
+	{                                                             \
+		nuts_tran_listen_accept(#scheme);                     \
+	}                                                             \
+	void test_##scheme##_exchange(void)                           \
+	{                                                             \
+		nuts_tran_exchange(#scheme);                          \
+	}                                                             \
+	void test_##scheme##_pipe_id(void)                            \
+	{                                                             \
+		nuts_tran_pipe_id(#scheme);                           \
+	}                                                             \
+	void test_##scheme##_huge_msg(void)                           \
+	{                                                             \
+		nuts_tran_huge_msg(#scheme, NUTS_TRAN_HUGE_MSG_SIZE); \
+	}                                                             \
+	void test_##scheme##_perf(void)                               \
+	{                                                             \
+		nuts_tran_perf(#scheme);                              \
+	}
+
+// clang-format off
+#define NUTS_INSERT_TRAN_TESTS(scheme) \
+	{ #scheme " conn refused", test_##scheme##_conn_refused }, \
+	{ #scheme " dialer cancel", test_##scheme##_dialer_cancel }, \
+	{ #scheme " dialer closed", test_##scheme##_dialer_closed }, \
+	{ #scheme " duplicate listen", test_##scheme##_duplicate_listen }, \
+	{ #scheme " listener cancel", test_##scheme##_listener_cancel }, \
+	{ #scheme " listener closed", test_##scheme##_listener_closed }, \
+	{ #scheme " listen accept", test_##scheme##_listen_accept }, \
+	{ #scheme " exchange", test_##scheme##_exchange }, \
+	{ #scheme " pipe id", test_##scheme##_pipe_id }, \
+	{ #scheme " huge msg", test_##scheme##_huge_msg }, \
+	{ #scheme " perf", test_##scheme##_perf }
+// clang-format on
+
 // These are TLS certificates.  The client and server are signed with the
 // root.  The server uses CN 127.0.0.1.  Other details are bogus, but
 // designed to prevent accidental use elsewhere.
@@ -101,6 +201,12 @@ extern const char *nuts_server_key;
 extern const char *nuts_server_crt;
 extern const char *nuts_client_key;
 extern const char *nuts_client_crt;
+extern const char *nuts_garbled_crt;
+// These ones use ecdsa with prime256v1.
+extern const char *nuts_ecdsa_server_key;
+extern const char *nuts_ecdsa_server_crt;
+extern const char *nuts_ecdsa_client_key;
+extern const char *nuts_ecdsa_client_crt;
 
 // NUTS_SUCCESS tests for NNG success.  It reports the failure if it
 // did not.
@@ -198,11 +304,19 @@ extern const char *nuts_client_crt;
 #define NUTS_ASSERT TEST_ASSERT
 #define NUTS_CASE TEST_CASE
 #define NUTS_MSG TEST_MSG
+#define NUTS_SKIP TEST_SKIP
 
 #define NUTS_TESTS TEST_LIST
 
 #define NUTS_PROTO(x, y) (((x) << 4u) | (y))
 
+#define NUTS_ENABLE_LOG(level) nuts_set_logger(level)
+
+#define NUTS_LOGGING()                            \
+	do {                                      \
+		nng_log_set_logger(nuts_logger);  \
+		nng_log_set_level(NNG_LOG_DEBUG); \
+	} while (0)
 #ifdef __cplusplus
 };
 #endif

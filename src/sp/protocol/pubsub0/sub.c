@@ -1,5 +1,5 @@
 //
-// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2024 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 // Copyright 2019 Nathan Kent <nate@nkent.net>
 //
@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "core/nng_impl.h"
+#include "core/socket.h"
 #include "nng/protocol/pubsub0/sub.h"
 
 // Subscriber protocol.  The SUB protocol receives messages sent to
@@ -44,14 +45,14 @@ static void sub0_pipe_fini(void *);
 struct sub0_topic {
 	nni_list_node node;
 	size_t        len;
-	void *        buf;
+	void         *buf;
 };
 
 // sub0_ctx is a context for a SUB socket.  The advantage of contexts is
 // that different contexts can maintain different subscriptions.
 struct sub0_ctx {
 	nni_list_node node;
-	sub0_sock *   sock;
+	sub0_sock    *sock;
 	nni_list      topics;     // TODO: Consider patricia trie
 	nni_list      recv_queue; // can have multiple pending receives
 	nni_lmq       lmq;
@@ -71,7 +72,7 @@ struct sub0_sock {
 
 // sub0_pipe is our per-pipe protocol private structure.
 struct sub0_pipe {
-	nni_pipe * pipe;
+	nni_pipe  *pipe;
 	sub0_sock *sub;
 	nni_aio    aio_recv;
 };
@@ -79,7 +80,7 @@ struct sub0_pipe {
 static void
 sub0_ctx_cancel(nng_aio *aio, void *arg, int rv)
 {
-	sub0_ctx * ctx  = arg;
+	sub0_ctx  *ctx  = arg;
 	sub0_sock *sock = ctx->sock;
 	nni_mtx_lock(&sock->lk);
 	if (nni_list_active(&ctx->recv_queue, aio)) {
@@ -92,9 +93,9 @@ sub0_ctx_cancel(nng_aio *aio, void *arg, int rv)
 static void
 sub0_ctx_recv(void *arg, nni_aio *aio)
 {
-	sub0_ctx * ctx  = arg;
+	sub0_ctx  *ctx  = arg;
 	sub0_sock *sock = ctx->sock;
-	nni_msg *  msg;
+	nni_msg   *msg;
 
 	if (nni_aio_begin(aio) != 0) {
 		return;
@@ -140,9 +141,9 @@ sub0_ctx_send(void *arg, nni_aio *aio)
 static void
 sub0_ctx_close(void *arg)
 {
-	sub0_ctx * ctx  = arg;
+	sub0_ctx  *ctx  = arg;
 	sub0_sock *sock = ctx->sock;
-	nni_aio *  aio;
+	nni_aio   *aio;
 
 	nni_mtx_lock(&sock->lk);
 	while ((aio = nni_list_first(&ctx->recv_queue)) != NULL) {
@@ -155,8 +156,8 @@ sub0_ctx_close(void *arg)
 static void
 sub0_ctx_fini(void *arg)
 {
-	sub0_ctx *  ctx  = arg;
-	sub0_sock * sock = ctx->sock;
+	sub0_ctx   *ctx  = arg;
+	sub0_sock  *sock = ctx->sock;
 	sub0_topic *topic;
 
 	sub0_ctx_close(ctx);
@@ -179,7 +180,7 @@ static void
 sub0_ctx_init(void *ctx_arg, void *sock_arg)
 {
 	sub0_sock *sock = sock_arg;
-	sub0_ctx * ctx  = ctx_arg;
+	sub0_ctx  *ctx  = ctx_arg;
 	size_t     len;
 	bool       prefer_new;
 
@@ -274,6 +275,9 @@ sub0_pipe_start(void *arg)
 
 	if (nni_pipe_peer(p->pipe) != NNI_PROTO_PUB_V0) {
 		// Peer protocol mismatch.
+		nng_log_warn("NNG-PEER-MISMATCH",
+		    "Peer protocol mismatch: %d != %d, rejected.",
+		    nni_pipe_peer(p->pipe), NNI_PROTO_PUB_V0);
 		return (NNG_EPROTO);
 	}
 
@@ -311,22 +315,22 @@ sub0_matches(sub0_ctx *ctx, uint8_t *body, size_t len)
 static void
 sub0_recv_cb(void *arg)
 {
-	sub0_pipe *p    = arg;
-	sub0_sock *sock = p->sub;
-	sub0_ctx * ctx;
-	nni_msg *  msg;
-	size_t     len;
-	uint8_t *  body;
-	nni_list   finish;
-	nng_aio *  aio;
-	nni_msg *  dup_msg;
+	sub0_pipe          *p    = arg;
+	sub0_sock          *sock = p->sub;
+	sub0_ctx           *ctx;
+	nni_msg            *msg;
+	size_t              len;
+	uint8_t            *body;
+	nng_aio            *aio;
+	nni_msg            *dup_msg;
+	nni_aio_completions finish;
 
 	if (nni_aio_result(&p->aio_recv) != 0) {
 		nni_pipe_close(p->pipe);
 		return;
 	}
 
-	nni_aio_list_init(&finish);
+	nni_aio_completions_init(&finish);
 
 	msg = nni_aio_get_msg(&p->aio_recv);
 	nni_aio_set_msg(&p->aio_recv, NULL);
@@ -370,7 +374,7 @@ sub0_recv_cb(void *arg)
 			nni_aio_set_msg(aio, dup_msg);
 
 			// Save for synchronous completion
-			nni_list_append(&finish, aio);
+			nni_aio_completions_add(&finish, aio, 0, len);
 		} else if (nni_lmq_full(&ctx->lmq)) {
 			// Make space for the new message.
 			nni_msg *old;
@@ -401,10 +405,7 @@ sub0_recv_cb(void *arg)
 		nni_msg_free(msg);
 	}
 
-	while ((aio = nni_list_first(&finish)) != NULL) {
-		nni_list_remove(&finish, aio);
-		nni_aio_finish_sync(aio, 0, len);
-	}
+	nni_aio_completions_run(&finish);
 
 	nni_pipe_recv(p->pipe, &p->aio_recv);
 }
@@ -412,7 +413,7 @@ sub0_recv_cb(void *arg)
 static int
 sub0_ctx_get_recv_buf_len(void *arg, void *buf, size_t *szp, nni_type t)
 {
-	sub0_ctx * ctx  = arg;
+	sub0_ctx  *ctx  = arg;
 	sub0_sock *sock = ctx->sock;
 	int        val;
 	nni_mtx_lock(&sock->lk);
@@ -425,7 +426,7 @@ sub0_ctx_get_recv_buf_len(void *arg, void *buf, size_t *szp, nni_type t)
 static int
 sub0_ctx_set_recv_buf_len(void *arg, const void *buf, size_t sz, nni_type t)
 {
-	sub0_ctx * ctx  = arg;
+	sub0_ctx  *ctx  = arg;
 	sub0_sock *sock = ctx->sock;
 	int        val;
 	int        rv;
@@ -454,13 +455,11 @@ sub0_ctx_set_recv_buf_len(void *arg, const void *buf, size_t sz, nni_type t)
 // to replace this with a patricia trie, like old nanomsg had.
 
 static int
-sub0_ctx_subscribe(void *arg, const void *buf, size_t sz, nni_type t)
+sub0_ctx_subscribe(sub0_ctx *ctx, const void *buf, size_t sz)
 {
-	sub0_ctx *  ctx  = arg;
-	sub0_sock * sock = ctx->sock;
+	sub0_sock  *sock = ctx->sock;
 	sub0_topic *topic;
 	sub0_topic *new_topic;
-	NNI_ARG_UNUSED(t);
 
 	nni_mtx_lock(&sock->lk);
 	NNI_LIST_FOREACH (&ctx->topics, topic) {
@@ -492,13 +491,11 @@ sub0_ctx_subscribe(void *arg, const void *buf, size_t sz, nni_type t)
 }
 
 static int
-sub0_ctx_unsubscribe(void *arg, const void *buf, size_t sz, nni_type t)
+sub0_ctx_unsubscribe(sub0_ctx *ctx, const void *buf, size_t sz)
 {
-	sub0_ctx *  ctx  = arg;
-	sub0_sock * sock = ctx->sock;
+	sub0_sock  *sock = ctx->sock;
 	sub0_topic *topic;
 	size_t      len;
-	NNI_ARG_UNUSED(t);
 
 	nni_mtx_lock(&sock->lk);
 	NNI_LIST_FOREACH (&ctx->topics, topic) {
@@ -540,7 +537,7 @@ sub0_ctx_unsubscribe(void *arg, const void *buf, size_t sz, nni_type t)
 static int
 sub0_ctx_get_prefer_new(void *arg, void *buf, size_t *szp, nni_type t)
 {
-	sub0_ctx * ctx  = arg;
+	sub0_ctx  *ctx  = arg;
 	sub0_sock *sock = ctx->sock;
 	bool       val;
 
@@ -554,7 +551,7 @@ sub0_ctx_get_prefer_new(void *arg, void *buf, size_t *szp, nni_type t)
 static int
 sub0_ctx_set_prefer_new(void *arg, const void *buf, size_t sz, nni_type t)
 {
-	sub0_ctx * ctx  = arg;
+	sub0_ctx  *ctx  = arg;
 	sub0_sock *sock = ctx->sock;
 	bool       val;
 	int        rv;
@@ -578,14 +575,6 @@ static nni_option sub0_ctx_options[] = {
 	    .o_name = NNG_OPT_RECVBUF,
 	    .o_get  = sub0_ctx_get_recv_buf_len,
 	    .o_set  = sub0_ctx_set_recv_buf_len,
-	},
-	{
-	    .o_name = NNG_OPT_SUB_SUBSCRIBE,
-	    .o_set  = sub0_ctx_subscribe,
-	},
-	{
-	    .o_name = NNG_OPT_SUB_UNSUBSCRIBE,
-	    .o_set  = sub0_ctx_unsubscribe,
 	},
 	{
 	    .o_name = NNG_OPT_SUB_PREFNEW,
@@ -615,16 +604,11 @@ sub0_sock_recv(void *arg, nni_aio *aio)
 }
 
 static int
-sub0_sock_get_recv_fd(void *arg, void *buf, size_t *szp, nni_opt_type t)
+sub0_sock_get_recv_fd(void *arg, int *fdp)
 {
 	sub0_sock *sock = arg;
-	int        rv;
-	int        fd;
 
-	if ((rv = nni_pollable_getfd(&sock->readable, &fd)) != 0) {
-		return (rv);
-	}
-	return (nni_copyout_int(fd, buf, szp, t));
+	return (nni_pollable_getfd(&sock->readable, fdp));
 }
 
 static int
@@ -639,20 +623,6 @@ sub0_sock_set_recv_buf_len(void *arg, const void *buf, size_t sz, nni_type t)
 {
 	sub0_sock *sock = arg;
 	return (sub0_ctx_set_recv_buf_len(&sock->master, buf, sz, t));
-}
-
-static int
-sub0_sock_subscribe(void *arg, const void *buf, size_t sz, nni_type t)
-{
-	sub0_sock *sock = arg;
-	return (sub0_ctx_subscribe(&sock->master, buf, sz, t));
-}
-
-static int
-sub0_sock_unsubscribe(void *arg, const void *buf, size_t sz, nni_type t)
-{
-	sub0_sock *sock = arg;
-	return (sub0_ctx_unsubscribe(&sock->master, buf, sz, t));
 }
 
 static int
@@ -691,18 +661,6 @@ static nni_proto_ctx_ops sub0_ctx_ops = {
 
 static nni_option sub0_sock_options[] = {
 	{
-	    .o_name = NNG_OPT_SUB_SUBSCRIBE,
-	    .o_set  = sub0_sock_subscribe,
-	},
-	{
-	    .o_name = NNG_OPT_SUB_UNSUBSCRIBE,
-	    .o_set  = sub0_sock_unsubscribe,
-	},
-	{
-	    .o_name = NNG_OPT_RECVFD,
-	    .o_get  = sub0_sock_get_recv_fd,
-	},
-	{
 	    .o_name = NNG_OPT_RECVBUF,
 	    .o_get  = sub0_sock_get_recv_buf_len,
 	    .o_set  = sub0_sock_set_recv_buf_len,
@@ -719,14 +677,15 @@ static nni_option sub0_sock_options[] = {
 };
 
 static nni_proto_sock_ops sub0_sock_ops = {
-	.sock_size    = sizeof(sub0_sock),
-	.sock_init    = sub0_sock_init,
-	.sock_fini    = sub0_sock_fini,
-	.sock_open    = sub0_sock_open,
-	.sock_close   = sub0_sock_close,
-	.sock_send    = sub0_sock_send,
-	.sock_recv    = sub0_sock_recv,
-	.sock_options = sub0_sock_options,
+	.sock_size         = sizeof(sub0_sock),
+	.sock_init         = sub0_sock_init,
+	.sock_fini         = sub0_sock_fini,
+	.sock_open         = sub0_sock_open,
+	.sock_close        = sub0_sock_close,
+	.sock_send         = sub0_sock_send,
+	.sock_recv         = sub0_sock_recv,
+	.sock_recv_poll_fd = sub0_sock_get_recv_fd,
+	.sock_options      = sub0_sock_options,
 };
 
 static nni_proto sub0_proto = {
@@ -743,4 +702,88 @@ int
 nng_sub0_open(nng_socket *sock)
 {
 	return (nni_proto_open(sock, &sub0_proto));
+}
+
+int
+nng_sub0_socket_subscribe(nng_socket id, const void *buf, size_t sz)
+{
+	int        rv;
+	nni_sock  *s;
+	sub0_sock *sock;
+
+	if ((rv = nni_sock_find(&s, id.id)) != 0) {
+		return (rv);
+	}
+	// validate the socket type
+	if (nni_sock_proto_ops(s)->sock_init != sub0_sock_init) {
+		nni_sock_rele(s);
+		return (NNG_ENOTSUP);
+	}
+	sock = nni_sock_proto_data(s);
+	rv   = sub0_ctx_subscribe(&sock->master, buf, sz);
+	nni_sock_rele(s);
+	return (rv);
+}
+
+int
+nng_sub0_socket_unsubscribe(nng_socket id, const void *buf, size_t sz)
+{
+	int        rv;
+	nni_sock  *s;
+	sub0_sock *sock;
+
+	if ((rv = nni_sock_find(&s, id.id)) != 0) {
+		return (rv);
+	}
+	// validate the socket type
+	if (nni_sock_proto_ops(s)->sock_init != sub0_sock_init) {
+		nni_sock_rele(s);
+		return (NNG_ENOTSUP);
+	}
+	sock = nni_sock_proto_data(s);
+	rv   = sub0_ctx_unsubscribe(&sock->master, buf, sz);
+	nni_sock_rele(s);
+	return (rv);
+}
+
+int
+nng_sub0_ctx_subscribe(nng_ctx id, const void *buf, size_t sz)
+{
+	int       rv;
+	nni_ctx  *c;
+	sub0_ctx *ctx;
+
+	if ((rv = nni_ctx_find(&c, id.id, false)) != 0) {
+		return (rv);
+	}
+	// validate the socket type
+	if (nni_ctx_proto_ops(c)->ctx_init != sub0_ctx_init) {
+		nni_ctx_rele(c);
+		return (NNG_ENOTSUP);
+	}
+	ctx = nni_ctx_proto_data(c);
+	rv  = sub0_ctx_subscribe(ctx, buf, sz);
+	nni_ctx_rele(c);
+	return (rv);
+}
+
+int
+nng_sub0_ctx_unsubscribe(nng_ctx id, const void *buf, size_t sz)
+{
+	int       rv;
+	nni_ctx  *c;
+	sub0_ctx *ctx;
+
+	if ((rv = nni_ctx_find(&c, id.id, false)) != 0) {
+		return (rv);
+	}
+	// validate the socket type
+	if (nni_ctx_proto_ops(c)->ctx_init != sub0_ctx_init) {
+		nni_ctx_rele(c);
+		return (NNG_ENOTSUP);
+	}
+	ctx = nni_ctx_proto_data(c);
+	rv  = sub0_ctx_unsubscribe(ctx, buf, sz);
+	nni_ctx_rele(c);
+	return (rv);
 }

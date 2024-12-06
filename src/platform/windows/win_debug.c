@@ -1,5 +1,5 @@
 //
-// Copyright 2020 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2024 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -30,12 +30,6 @@ nni_plat_printf(const char *fmt, ...)
 	va_start(ap, fmt);
 	(void) vprintf(fmt, ap);
 	va_end(ap);
-}
-
-void
-nni_plat_println(const char *message)
-{
-	(void) fprintf(stderr, "%s\n", message);
 }
 
 const char *
@@ -111,7 +105,7 @@ static struct {
         { ERROR_DUP_NAME,           NNG_EADDRINUSE   },
 	{ ERROR_BROKEN_PIPE,	    NNG_ECLOSED	     },
 	{ ERROR_BAD_PIPE,	    NNG_ECLOSED	     },
-	{ ERROR_NO_DATA,	    NNG_ECLOSED	     },
+	{ ERROR_NO_DATA,	    NNG_ECONNRESET   },
 	{ ERROR_PIPE_NOT_CONNECTED, NNG_ECLOSED	     },
 	{ ERROR_OPERATION_ABORTED,  NNG_ECLOSED	     },
 	{ ERROR_SHARING_VIOLATION,  NNG_EBUSY        },

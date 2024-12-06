@@ -1,5 +1,5 @@
 //
-// Copyright 2019 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2024 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 // Copyright 2019 Devolutions <info@devolutions.net>
 //
@@ -102,15 +102,13 @@ extern void nni_http_conn_close(nni_http_conn *);
 extern void nni_http_conn_fini(nni_http_conn *);
 extern int  nni_http_conn_getopt(
      nni_http_conn *, const char *, void *, size_t *, nni_type);
-extern int nni_http_conn_setopt(
-    nni_http_conn *, const char *, const void *, size_t, nni_type);
 
 // Reading messages -- the caller must supply a preinitialized (but otherwise
 // idle) message.  We recommend the caller store this in the aio's user data.
 // Note that the iovs of the aio's are clobbered by these methods -- callers
 // must not use them for any other purpose.
 
-extern int  nni_http_req_alloc(nni_http_req **, const nni_url *);
+extern int  nni_http_req_alloc(nni_http_req **, const nng_url *);
 extern int  nni_http_res_alloc(nni_http_res **);
 extern int  nni_http_res_alloc_error(nni_http_res **, uint16_t);
 extern void nni_http_req_free(nni_http_req *);
@@ -120,8 +118,8 @@ extern void nni_http_write_res(nni_http_conn *, nni_http_res *, nni_aio *);
 extern void nni_http_read_req(nni_http_conn *, nni_http_req *, nni_aio *);
 extern void nni_http_read_res(nni_http_conn *, nni_http_res *, nni_aio *);
 
-extern const char *nni_http_req_get_header(nni_http_req *, const char *);
-extern const char *nni_http_res_get_header(nni_http_res *, const char *);
+extern const char *nni_http_req_get_header(const nni_http_req *, const char *);
+extern const char *nni_http_res_get_header(const nni_http_res *, const char *);
 extern int nni_http_req_add_header(nni_http_req *, const char *, const char *);
 extern int nni_http_res_add_header(nni_http_res *, const char *, const char *);
 extern int nni_http_req_set_header(nni_http_req *, const char *, const char *);
@@ -134,17 +132,17 @@ extern int nni_http_req_set_data(nni_http_req *, const void *, size_t);
 extern int nni_http_res_set_data(nni_http_res *, const void *, size_t);
 extern int nni_http_req_alloc_data(nni_http_req *, size_t);
 extern int nni_http_res_alloc_data(nni_http_res *, size_t);
-extern const char *nni_http_req_get_method(nni_http_req *);
-extern const char *nni_http_req_get_version(nni_http_req *);
-extern const char *nni_http_req_get_uri(nni_http_req *);
+extern const char *nni_http_req_get_method(const nni_http_req *);
+extern const char *nni_http_req_get_version(const nni_http_req *);
+extern const char *nni_http_req_get_uri(const nni_http_req *);
 extern int         nni_http_req_set_method(nni_http_req *, const char *);
 extern int         nni_http_req_set_version(nni_http_req *, const char *);
 extern int         nni_http_req_set_uri(nni_http_req *, const char *);
-extern uint16_t    nni_http_res_get_status(nni_http_res *);
+extern uint16_t    nni_http_res_get_status(const nni_http_res *);
 extern int         nni_http_res_set_status(nni_http_res *, uint16_t);
-extern const char *nni_http_res_get_version(nni_http_res *);
+extern const char *nni_http_res_get_version(const nni_http_res *);
 extern int         nni_http_res_set_version(nni_http_res *, const char *);
-extern const char *nni_http_res_get_reason(nni_http_res *);
+extern const char *nni_http_res_get_reason(const nni_http_res *);
 extern int         nni_http_res_set_reason(nni_http_res *, const char *);
 
 // nni_http_res_is_error is true if the status was allocated as part of
@@ -172,7 +170,7 @@ extern void nni_http_write_full(nni_http_conn *, nni_aio *);
 // a restricted binding is required, we recommend using a URL consisting
 // of an empty host name, such as http://  or https://  -- this would
 // convert to binding to the default port on all interfaces on the host.
-extern int nni_http_server_init(nni_http_server **, const nni_url *);
+extern int nni_http_server_init(nni_http_server **, const nng_url *);
 
 // nni_http_server_fini drops the reference count on the server, and
 // if this was the last reference, closes down the server and frees
@@ -216,7 +214,14 @@ extern int nni_http_server_start(nni_http_server *);
 // nni_http_server_stop stops the server, closing the listening socket.
 // Connections that have been "upgraded" are unaffected.  Connections
 // associated with a callback will complete their callback, and then close.
+// Connections will be aborted but may not have terminated all the way.
 extern void nni_http_server_stop(nni_http_server *);
+
+// nni_http_server_close closes down the socket, but does not shut down
+// any connections that are already open.  This is useful for example
+// when shutting down an SP listener, and we don't want to break established
+// sessions.
+extern void nni_http_server_close(nni_http_server *);
 
 // nni_http_server_set_error_page sets an error page for the named status.
 extern int nni_http_server_set_error_page(
@@ -344,7 +349,7 @@ extern const char *nni_http_handler_get_uri(nni_http_handler *);
 
 // Client stuff.
 
-extern int  nni_http_client_init(nni_http_client **, const nni_url *);
+extern int  nni_http_client_init(nni_http_client **, const nng_url *);
 extern void nni_http_client_fini(nni_http_client *);
 
 // nni_http_client_set_tls sets the TLS configuration.  This wipes out

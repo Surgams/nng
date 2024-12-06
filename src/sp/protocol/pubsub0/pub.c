@@ -1,5 +1,5 @@
 //
-// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2024 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -135,6 +135,9 @@ pub0_pipe_start(void *arg)
 	pub0_sock *sock = p->pub;
 
 	if (nni_pipe_peer(p->pipe) != NNI_PROTO_SUB_V0) {
+		nng_log_warn("NNG-PEER-MISMATCH",
+		    "Peer protocol mismatch: %d != %d, rejected.",
+		    nni_pipe_peer(p->pipe), NNI_PROTO_SUB_V0);
 		return (NNG_EPROTO);
 	}
 	nni_mtx_lock(&sock->mtx);
@@ -250,21 +253,13 @@ pub0_sock_send(void *arg, nni_aio *aio)
 }
 
 static int
-pub0_sock_get_sendfd(void *arg, void *buf, size_t *szp, nni_type t)
+pub0_sock_get_sendfd(void *arg, int *fdp)
 {
 	pub0_sock *sock = arg;
-	int        fd;
-	int        rv;
-	nni_mtx_lock(&sock->mtx);
+
 	// PUB sockets are *always* writable.
 	nni_pollable_raise(&sock->sendable);
-	rv = nni_pollable_getfd(&sock->sendable, &fd);
-	nni_mtx_unlock(&sock->mtx);
-
-	if (rv == 0) {
-		rv = nni_copyout_int(fd, buf, szp, t);
-	}
-	return (rv);
+	return (nni_pollable_getfd(&sock->sendable, fdp));
 }
 
 static int
@@ -318,10 +313,6 @@ static nni_proto_pipe_ops pub0_pipe_ops = {
 static nni_option pub0_sock_options[] = {
 	// terminate list
 	{
-	    .o_name = NNG_OPT_SENDFD,
-	    .o_get  = pub0_sock_get_sendfd,
-	},
-	{
 	    .o_name = NNG_OPT_SENDBUF,
 	    .o_get  = pub0_sock_get_sendbuf,
 	    .o_set  = pub0_sock_set_sendbuf,
@@ -332,14 +323,15 @@ static nni_option pub0_sock_options[] = {
 };
 
 static nni_proto_sock_ops pub0_sock_ops = {
-	.sock_size    = sizeof(pub0_sock),
-	.sock_init    = pub0_sock_init,
-	.sock_fini    = pub0_sock_fini,
-	.sock_open    = pub0_sock_open,
-	.sock_close   = pub0_sock_close,
-	.sock_send    = pub0_sock_send,
-	.sock_recv    = pub0_sock_recv,
-	.sock_options = pub0_sock_options,
+	.sock_size         = sizeof(pub0_sock),
+	.sock_init         = pub0_sock_init,
+	.sock_fini         = pub0_sock_fini,
+	.sock_open         = pub0_sock_open,
+	.sock_close        = pub0_sock_close,
+	.sock_send         = pub0_sock_send,
+	.sock_recv         = pub0_sock_recv,
+	.sock_send_poll_fd = pub0_sock_get_sendfd,
+	.sock_options      = pub0_sock_options,
 };
 
 static nni_proto pub0_proto = {
